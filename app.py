@@ -197,21 +197,18 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE (Grouped before Q4 2025, Monthly onwards) ---
+            # --- 1. HYBRID TREND LINE ---
             st.subheader("1. Rejection Rate Trend (%)")
             
             def hybrid_time_label(row):
                 d = row['Production_Date']
                 if pd.isnull(d): return "Unknown"
-                # From Oct 2025 onwards -> Monthly format
                 if d.year > 2025 or (d.year == 2025 and d.month >= 10):
                     return d.strftime('%Y-%m')
-                # Before Oct 2025 -> Keep the old Time_Group (e.g., 2024 Full Year, 2025 Q1)
                 return row['Time_Group']
                 
             df_scrap_master['Trend_Time'] = df_scrap_master.apply(hybrid_time_label, axis=1)
             
-            # Aggregate data for the trend, and use 'min' Production_Date to sort chronologically
             trend_data = df_scrap_master.groupby('Trend_Time').agg(
                 Input_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
@@ -220,8 +217,6 @@ if uploaded_file is not None:
             
             trend_data = trend_data[trend_data['Trend_Time'] != 'Unknown']
             trend_data['Rejection_Rate (%)'] = (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100).round(2)
-            
-            # Sort chronologically based on the earliest date in that period
             trend_data = trend_data.sort_values('Sort_Date')
 
             fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
@@ -233,14 +228,13 @@ if uploaded_file is not None:
                 ax_trend.set_ylabel("Rejection Rate (%)")
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
                 
-                # Format annotation to 2 decimal places exactly
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
                     ax_trend.text(i, val + 0.1, f'{val:.2f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
                 
                 plt.xticks(rotation=45)
             st.pyplot(fig_trend)
 
-            # --- 2. PERIOD SUMMARY ---
+            # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
             st.subheader("2. Scrap Rate by Time Period")
             scrap_by_period = df_scrap_master.groupby('Time_Group').agg(
@@ -250,13 +244,24 @@ if uploaded_file is not None:
             ).reset_index()
             scrap_by_period['Scrap_Rate (%)'] = (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100).round(2)
             
+            # Period Chart
+            fig_p, ax_p = plt.subplots(figsize=(10, 4))
+            if not scrap_by_period.empty:
+                ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
+                ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
+                ax_p.set_ylabel("Scrap Rate (%)")
+                ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2)
+                for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
+                    ax_p.text(i, val + 0.05, f"{val:.2f}%", ha='center', va='bottom', fontweight='bold')
+            st.pyplot(fig_p)
+
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
                 .format({'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
 
-            # --- 3. LEVEL-BY-LEVEL DRILL DOWN ---
+            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
             st.subheader("3. Deep Analysis: Scrap Rate by Period / Thickness / Material")
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
@@ -268,6 +273,28 @@ if uploaded_file is not None:
             scrap_detail = scrap_detail[scrap_detail['Total_Length'] > 0]
             scrap_detail['Scrap_Rate (%)'] = (scrap_detail['Total_Scrap'] / scrap_detail['Total_Length'] * 100).round(2)
             
+            # Thickness and Material Charts
+            col_t, col_m = st.columns(2)
+            with col_t:
+                st.markdown("**Scrap Rate by Period & Thickness**")
+                fig_t, ax_t = plt.subplots(figsize=(8, 4))
+                if not scrap_detail.empty:
+                    pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
+                    if not pivot_t.empty:
+                        pivot_t.plot(kind='bar', ax=ax_t, colormap='YlOrRd', edgecolor='white')
+                ax_t.set_ylabel("Scrap Rate (%)")
+                st.pyplot(fig_t)
+
+            with col_m:
+                st.markdown("**Scrap Rate by Period & Material**")
+                fig_m, ax_m = plt.subplots(figsize=(8, 4))
+                if not scrap_detail.empty:
+                    pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
+                    if not pivot_m.empty:
+                        pivot_m.plot(kind='bar', ax=ax_m, colormap='Set2', edgecolor='white')
+                ax_m.set_ylabel("Scrap Rate (%)")
+                st.pyplot(fig_m)
+
             st.dataframe(
                 scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges')
                 .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
