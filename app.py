@@ -11,17 +11,22 @@ st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
-# --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT ---
+# --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT PER THICKNESS ---
 st.sidebar.header("⚙️ Spec Limits (Control)")
-st.sidebar.info("Enter limits for the SPC charts. Leave blank if not applicable.")
-GLOBAL_SPECS = {}
-for feat in ['YS', 'TS', 'EL', 'YPE']:
-    with st.sidebar.expander(f"{feat} Configuration"):
-        c1, c2 = st.columns(2)
-        min_val = c1.number_input(f"Min", value=None, key=f"{feat}_min")
-        max_val = c2.number_input(f"Max", value=None, key=f"{feat}_max")
-        tgt_val = st.number_input(f"Target", value=None, key=f"{feat}_tgt")
-        GLOBAL_SPECS[feat] = {'min': min_val, 'max': max_val, 'target': tgt_val}
+st.sidebar.info("Limits apply from Q4 2025 onwards. Configured per Thickness.")
+
+GLOBAL_SPECS = {0.5: {}, 0.6: {}, 0.8: {}}
+target_thicks = [0.5, 0.6, 0.8]
+
+for t in target_thicks:
+    with st.sidebar.expander(f"📏 Limits for {t}mm"):
+        for feat in ['YS', 'TS', 'EL', 'YPE']:
+            st.caption(f"**{feat}**")
+            c1, c2, c3 = st.columns(3)
+            min_v = c1.number_input("Min", value=None, key=f"{t}_{feat}_min", label_visibility="collapsed", placeholder="Min")
+            max_v = c2.number_input("Max", value=None, key=f"{t}_{feat}_max", label_visibility="collapsed", placeholder="Max")
+            tgt_v = c3.number_input("Tgt", value=None, key=f"{t}_{feat}_tgt", label_visibility="collapsed", placeholder="Tgt")
+            GLOBAL_SPECS[t][feat] = {'min': min_v, 'max': max_v, 'target': tgt_v}
 
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
@@ -30,7 +35,6 @@ if uploaded_file is not None:
     df.columns = df.columns.astype(str).str.strip()
 
     # --- 1. DATA PRE-PROCESSING ---
-    # Handle Thickness
     if 'Actual_Thickness' not in df.columns:
         if 'Thickness' in df.columns:
             df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
@@ -62,13 +66,11 @@ if uploaded_file is not None:
         df['Actual_Thickness'] = 0.0
         df = df.iloc[0:0]
 
-    # Handle Material
     if '熱軋材質' in df.columns:
         df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
     else:
         df['HR_Material'] = 'Unknown'
 
-    # Handle Dates & Time Grouping
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -90,7 +92,6 @@ if uploaded_file is not None:
         df['Time_Group'] = df['Production_Date'].apply(categorize_period)
         df = df[df['Time_Group'] != "Other"]
         
-        # Duplicate 2025 data to create a "2025 (Full Year)" summary row
         df_25 = df[df['Production_Date'].dt.year == 2025].copy()
         if not df_25.empty:
             df_25['Time_Group'] = "2025 (Full Year)"
@@ -98,7 +99,6 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = [c for c in df.columns if c == g or c == f"{g}個數" or str(c).startswith(f"{g}.")]
@@ -108,14 +108,12 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
-    # Mechanical Properties Mapping
     df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     for f in mech_features:
         if f in df.columns:
             df[f] = pd.to_numeric(df[f], errors='coerce')
 
-    # Pre-clean Length and Scrap Columns
     LEN_COL = '實測長度'
     SCRAP_COL = '尾料剔退'
     if LEN_COL in df.columns:
@@ -123,14 +121,11 @@ if uploaded_file is not None:
     if SCRAP_COL in df.columns:
         df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
 
-    # FILTER: Prevent dropping rows that have 0 length but contain Scrap or Qty data
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
-    # Global Style Setup for Matplotlib charts
     sns.set_theme(style="whitegrid")
     solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
-    # Custom Sorter for Time_Group to keep logical order
     def get_sort_key(x):
         if "2024 (Full Year)" in x: return "2024-00"
         if "2025 H1" in x: return "2025-00a"
@@ -138,7 +133,6 @@ if uploaded_file is not None:
         if "2025 (Full Year)" in x: return "2025-99" 
         return x
 
-    # HELPER FUNCTION: Add borders to charts
     def add_chart_border(ax):
         for spine in ax.spines.values():
             spine.set_visible(True)
@@ -317,24 +311,28 @@ if uploaded_file is not None:
     # ==========================================================
     with tab3:
         st.header("📊 Distribution & Process Capability (SPC)")
-        st.info("Visualizing mechanical property distribution and capability indices. Control Limits apply from Q4 2025 onwards.")
+        st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards, evaluated per thickness.")
 
         def is_valid_for_control(period_label):
-            # Only evaluate limits if the string starts with "2025-10" or later dates (2025-11, 2026-01, etc.)
             if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
                 return False
             return True
 
-        def calc_capability(values, feat, period_label):
+        def calc_capability(values, feat, period_label, thickness):
             vals = np.array(values, dtype=float)
             vals = vals[~np.isnan(vals)]
-            if len(vals) < 2: return None
             
+            # If "Overall" (mixed thicknesses), we cannot calculate a single Cpk.
+            if thickness == 'Overall':
+                return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
+                        'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
+
+            if len(vals) < 2: return None
             mu  = np.mean(vals)
             std = np.std(vals, ddof=1)
             if std == 0: return None
 
-            spec = GLOBAL_SPECS.get(feat, {})
+            spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
             lsl  = spec.get('min')
             usl  = spec.get('max')
             tgt  = spec.get('target')
@@ -378,7 +376,8 @@ if uploaded_file is not None:
             if cpk >= 1.00: return '#ffa726'   
             return '#d62728'                   
 
-        def cpk_label(cpk, period_label):
+        def cpk_label(cpk, period_label, thickness):
+            if thickness == 'Overall': return 'Mixed Specs'
             if not is_valid_for_control(period_label): return 'Not Monitored'
             if cpk is None: return 'N/A'
             if cpk >= 1.67: return '✅ Excellent'
@@ -386,18 +385,22 @@ if uploaded_file is not None:
             if cpk >= 1.00: return '⚠️ Marginal'
             return '❌ Not Capable'
 
-        def render_capability_badge(cap, feat, period_label):
+        def render_capability_badge(cap, feat, period_label, thickness):
             if cap is None: return
             
             mu_v   = f"{cap['mean']:.2f}"
             std_v  = f"{cap['std']:.3f}"
             
-            if is_valid_for_control(period_label):
+            if thickness == 'Overall':
+                cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+                clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
+                lsl_v, usl_v = '—', '—'
+            elif is_valid_for_control(period_label):
                 cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
                 cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
                 ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
                 clr    = cpk_color(cap['Cpk'])
-                lbl    = cpk_label(cap['Cpk'], period_label)
+                lbl    = cpk_label(cap['Cpk'], period_label, thickness)
                 lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
                 usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
             else:
@@ -424,14 +427,14 @@ if uploaded_file is not None:
             """
             st.markdown(html_badge, unsafe_allow_html=True)
 
-        def build_capability_summary(df_src, feat, label):
+        def build_capability_summary(df_src, feat, label, thick):
             vals = df_src[feat].dropna().values if feat in df_src.columns else []
-            cap = calc_capability(vals, feat, label)
-            if cap is None: return None
+            cap = calc_capability(vals, feat, label, thick)
+            if cap is None or cap['n'] < 2: return None
             
             if not is_valid_for_control(label):
                 return {
-                    'Period': label, 'Feature': feat, 'n': cap['n'],
+                    'Period': label, 'Thickness': thick, 'Feature': feat, 'n': cap['n'],
                     'Mean': round(cap['mean'], 2), 'Std': round(cap['std'], 3),
                     'LSL': None, 'USL': None, 'Ca (%)': None, 'Cp': None, 'Cpk': None,
                     'Verdict': 'Not Monitored'
@@ -439,6 +442,7 @@ if uploaded_file is not None:
 
             return {
                 'Period': label,
+                'Thickness': thick,
                 'Feature': feat,
                 'n': cap['n'],
                 'Mean': round(cap['mean'], 2),
@@ -448,7 +452,7 @@ if uploaded_file is not None:
                 'Ca (%)': cap['Ca'],
                 'Cp': cap['Cp'],
                 'Cpk': cap['Cpk'],
-                'Verdict': cpk_label(cap['Cpk'], label).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
+                'Verdict': cpk_label(cap['Cpk'], label, thick).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
             }
 
         global_x_bounds = {}
@@ -470,7 +474,7 @@ if uploaded_file is not None:
                         max_y = max(max_y, cnts.max())
             return max_y * 1.35 if max_y > 0 else 50
 
-        def plot_dist(ax, data, feat, title, y_lim, period_label):
+        def plot_dist(ax, data, feat, title, y_lim, period_label, thickness):
             c_map = {'A-B+': '#2ca02c', 'A-B': '#1f77b4', 'A-B-': '#ff7f0e', 'B+': '#9467bd', 'B': '#d62728'}
             
             fmin, fmax = global_x_bounds.get(feat, (data[feat].min() if not data.empty else 0, data[feat].max() if not data.empty else 100))
@@ -518,8 +522,8 @@ if uploaded_file is not None:
                         arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
                     )
 
-            if is_valid_for_control(period_label):
-                spec = GLOBAL_SPECS.get(feat, {})
+            if thickness != 'Overall' and is_valid_for_control(period_label):
+                spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
                 lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
                 y_top = y_lim * 0.98
                 if lsl is not None:
@@ -540,19 +544,24 @@ if uploaded_file is not None:
             add_chart_border(ax)
 
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
+        thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
+        
         cap_summary_rows = []
         for _p in ordered_periods:
-            if _p == "2025 (Full Year)": continue # Skip summary row for capability charts
+            if _p == "2025 (Full Year)": continue 
             _dfp = df[df['Time_Group'] == _p]
-            for _f in ['YS', 'TS', 'EL', 'YPE']:
-                if _f in _dfp.columns:
-                    row = build_capability_summary(_dfp, _f, _p)
-                    if row: cap_summary_rows.append(row)
+            for _t in thickness_list:
+                _dft = _dfp[_dfp['Actual_Thickness'] == _t]
+                if _dft.empty: continue
+                for _f in ['YS', 'TS', 'EL', 'YPE']:
+                    if _f in _dft.columns:
+                        row = build_capability_summary(_dft, _f, _p, _t)
+                        if row: cap_summary_rows.append(row)
 
         if cap_summary_rows:
             cap_df = pd.DataFrame(cap_summary_rows)
             
-            st.markdown("### 📋 Detailed Capability Log")
+            st.markdown("### 📋 Detailed Capability Log (Per Thickness)")
             def color_cpk_cell(val):
                 if pd.isna(val) or val == 'N/A' or val == '': return ''
                 try:
@@ -562,6 +571,7 @@ if uploaded_file is not None:
                     return ''
 
             fmt = {
+                'Thickness': '{:.2f}',
                 'Mean': '{:.2f}', 'Std': '{:.3f}', 
                 'Cp': lambda v: f'{v:.3f}' if pd.notnull(v) else '—', 
                 'Cpk': lambda v: f'{v:.3f}' if pd.notnull(v) else '—',
@@ -577,8 +587,6 @@ if uploaded_file is not None:
             )
             st.markdown("---")
 
-        thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
-        
         for period in ordered_periods:
             if period == "2025 (Full Year)": continue
             df_p = df[df['Time_Group'] == period]
@@ -586,23 +594,38 @@ if uploaded_file is not None:
             
             st.markdown(f"## 📅 Period: **{period}**")
             
+            # Overall distribution (No Control Limits drawn because it's mixed)
+            ov_y = get_shared_y(df_p, ['YS', 'TS', 'EL', 'YPE'])
+            st.markdown(f"#### 🌐 Overall Summary (All Thicknesses)")
+            cols = st.columns(2)
+            for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
+                with cols[idx % 2]:
+                    fig, ax = plt.subplots(figsize=(8, 4.5))
+                    plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    vals_all = df_p[f].dropna().values
+                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
+            
+            # Specific thickness distribution
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
                 if df_t.empty: continue
                 
-                st.markdown(f"**📏 Thickness: {thick}mm**")
+                st.markdown(f"#### 📏 Thickness: **{thick}mm**")
                 ly = get_shared_y(df_t, ['YS', 'TS', 'EL', 'YPE'])
                 tcols = st.columns(2)
                 
                 for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_t.columns]):
                     with tcols[idx % 2]:
                         fig, ax = plt.subplots(figsize=(8, 4.5))
-                        plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period)
+                        plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
                         
                         vals_t = df_t[f].dropna().values
-                        render_capability_badge(calc_capability(vals_t, f, period), f, period)
+                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
+            st.markdown("---")
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
