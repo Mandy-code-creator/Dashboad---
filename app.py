@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 import io
 import seaborn as sns
@@ -9,6 +10,18 @@ import seaborn as sns
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
+
+# --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT ---
+st.sidebar.header("⚙️ Spec Limits (Control)")
+st.sidebar.info("Enter limits for the SPC charts. Leave blank if not applicable.")
+GLOBAL_SPECS = {}
+for feat in ['YS', 'TS', 'EL', 'YPE']:
+    with st.sidebar.expander(f"{feat} Configuration"):
+        c1, c2 = st.columns(2)
+        min_val = c1.number_input(f"Min", value=None, key=f"{feat}_min")
+        max_val = c2.number_input(f"Max", value=None, key=f"{feat}_max")
+        tgt_val = st.number_input(f"Target", value=None, key=f"{feat}_tgt")
+        GLOBAL_SPECS[feat] = {'min': min_val, 'max': max_val, 'target': tgt_val}
 
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
@@ -42,7 +55,6 @@ if uploaded_file is not None:
             return None 
             
         df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
-        
         df = df.dropna(subset=['Standard_Thickness'])
         df['Actual_Thickness'] = df['Standard_Thickness']
         df = df.drop(columns=['Standard_Thickness'])
@@ -96,6 +108,13 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
+    # Mechanical Properties Mapping
+    df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
+    mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
+    for f in mech_features:
+        if f in df.columns:
+            df[f] = pd.to_numeric(df[f], errors='coerce')
+
     # Pre-clean Length and Scrap Columns
     LEN_COL = '實測長度'
     SCRAP_COL = '尾料剔退'
@@ -104,13 +123,11 @@ if uploaded_file is not None:
     if SCRAP_COL in df.columns:
         df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
 
-    # FILTER: Prevent dropping rows that have 0 length but contain Scrap data
+    # FILTER: Prevent dropping rows that have 0 length but contain Scrap or Qty data
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
     # Global Style Setup for Matplotlib charts
     sns.set_theme(style="whitegrid")
-    
-    # Custom Solid Colors for bar charts
     solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
     # Custom Sorter for Time_Group to keep logical order
@@ -129,7 +146,7 @@ if uploaded_file is not None:
             spine.set_linewidth(1.0)
 
     # --- TABS ---
-    tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
+    tab0, tab1, tab3, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "📈 Task 3: Capability", "✂️ Task 5: Tail Scrap"])
 
     # ==========================================================
     # TASK 0: RAW DATA INSPECTION
@@ -150,7 +167,7 @@ if uploaded_file is not None:
             col_m3.metric("Date Range", "N/A")
             
         st.markdown("### Filtered Data Preview")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df.head(50), use_container_width=True) # Displaying first 50 for performance
 
     # ==========================================================
     # TASK 1: YIELD SUMMARY
@@ -169,7 +186,6 @@ if uploaded_file is not None:
             yield_summary['Yield (%)'] = (yield_summary['Acceptable_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             yield_summary['Defect_Rate (%)'] = (yield_summary['Severe_Bad_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             
-            # Sort for display
             yield_summary['_sort'] = yield_summary['Time_Group'].apply(get_sort_key)
             yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
 
@@ -197,7 +213,6 @@ if uploaded_file is not None:
         for g in base_grades:
             grade_dist_display[g] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
         
-        # Sort chronologically
         grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
         grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'])
         
@@ -234,23 +249,18 @@ if uploaded_file is not None:
         
         st.markdown(html, unsafe_allow_html=True)
 
-        # STACKED BAR CHART FOR GRADE DISTRIBUTION
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
         if not grade_dist_display.empty:
-            # Color palette from Dark Green to Dark Red for grades
             grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
             grade_dist_display.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
-            
             ax_g.set_ylabel("Percentage (%)")
             ax_g.set_xlabel("")
-            ax_g.set_ylim(0, 105) # Extra space on top
+            ax_g.set_ylim(0, 105)
             ax_g.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
             add_chart_border(ax_g)
             
-            # Add labels inside the stacked bars
             for container in ax_g.containers:
-                # Only show labels for values > 3% to avoid overlapping in tiny sections
                 labels = [f"{v.get_height():.1f}%" if v.get_height() > 3.0 else "" for v in container]
                 ax_g.bar_label(container, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
             
@@ -295,6 +305,263 @@ if uploaded_file is not None:
             st.pyplot(fig_d)
 
     # ==========================================================
+    # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
+    # ==========================================================
+    with tab3:
+        st.header("📊 Distribution & Process Capability (SPC)")
+        st.info("Visualizing mechanical property distribution and capability indices (Cp, Cpk, Ca) based on your target limits.")
+
+        # --- CAPABILITY INDEX HELPERS ---
+        def calc_capability(values, feat):
+            vals = np.array(values, dtype=float)
+            vals = vals[~np.isnan(vals)]
+            if len(vals) < 2: return None
+            
+            mu  = np.mean(vals)
+            std = np.std(vals, ddof=1)
+            if std == 0: return None
+
+            spec = GLOBAL_SPECS.get(feat, {})
+            lsl  = spec.get('min')
+            usl  = spec.get('max')
+            tgt  = spec.get('target')
+
+            result = {'mean': mu, 'std': std, 'n': len(vals),
+                      'Cp': None, 'Cpk': None, 'Ca': None,
+                      'LSL': lsl, 'USL': usl, 'Target': tgt}
+
+            if lsl is not None and usl is not None:
+                cp   = (usl - lsl) / (6 * std)
+                cpu  = (usl - mu)  / (3 * std)
+                cpl  = (mu  - lsl) / (3 * std)
+                cpk  = min(cpu, cpl)
+                result['Cp']  = round(cp,  3)
+                result['Cpk'] = round(cpk, 3)
+                if tgt is not None:
+                    ca = (mu - tgt) / ((usl - lsl) / 2) * 100
+                    result['Ca'] = round(ca, 2)
+                else:
+                    mid = (usl + lsl) / 2
+                    ca  = (mu - mid) / ((usl - lsl) / 2) * 100
+                    result['Ca'] = round(ca, 2)
+            elif lsl is not None:
+                cpl = (mu - lsl) / (3 * std)
+                result['Cp']  = round(cpl, 3)
+                result['Cpk'] = round(cpl, 3)
+            elif usl is not None:
+                cpu = (usl - mu) / (3 * std)
+                result['Cp']  = round(cpu, 3)
+                result['Cpk'] = round(cpu, 3)
+
+            return result
+
+        def cpk_color(cpk):
+            if cpk is None: return '#888888'
+            if cpk >= 1.67: return '#2e7d32'   
+            if cpk >= 1.33: return '#66bb6a'   
+            if cpk >= 1.00: return '#ffa726'   
+            return '#d62728'                   
+
+        def cpk_label(cpk):
+            if cpk is None: return 'N/A'
+            if cpk >= 1.67: return '✅ Excellent'
+            if cpk >= 1.33: return '✅ Capable'
+            if cpk >= 1.00: return '⚠️ Marginal'
+            return '❌ Not Capable'
+
+        def render_capability_badge(cap, feat):
+            if cap is None: return
+            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
+            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
+            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+            mu_v   = f"{cap['mean']:.2f}"
+            std_v  = f"{cap['std']:.3f}"
+            clr    = cpk_color(cap['Cpk'])
+            lbl    = cpk_label(cap['Cpk'])
+            
+            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
+            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+
+            html_badge = f"""
+            <div style="background:#f8f9fa;border-left:5px solid {clr};
+                        border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
+                        font-family:monospace;font-size:13px;line-height:1.8;">
+              <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
+              &nbsp;&nbsp;|&nbsp;&nbsp;
+              <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
+              &nbsp;&nbsp;|&nbsp;&nbsp;
+              <b>n</b>: {cap['n']} &nbsp;
+              <b>Mean</b>: {mu_v} &nbsp;
+              <b>Std</b>: {std_v}
+              <br>
+              <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
+              <b>Cp = {cp_v}</b> &nbsp;&nbsp;
+              <b>Ca = {ca_v}</b>
+            </div>
+            """
+            st.markdown(html_badge, unsafe_allow_html=True)
+
+        def build_capability_summary(df_src, feat, label):
+            vals = df_src[feat].dropna().values if feat in df_src.columns else []
+            cap = calc_capability(vals, feat)
+            if cap is None: return None
+            return {
+                'Period': label,
+                'Feature': feat,
+                'n': cap['n'],
+                'Mean': round(cap['mean'], 2),
+                'Std': round(cap['std'], 3),
+                'LSL': cap['LSL'],
+                'USL': cap['USL'],
+                'Ca (%)': cap['Ca'],
+                'Cp': cap['Cp'],
+                'Cpk': cap['Cpk'],
+                'Verdict': cpk_label(cap['Cpk']).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
+            }
+
+        global_x_bounds = {}
+        for feat in ['YS', 'TS', 'EL', 'YPE']:
+            if feat in df.columns:
+                vd = df[[feat, 'Total_Qty']].dropna().copy()
+                vd = vd[vd['Total_Qty'] > 0]
+                if not vd.empty:
+                    q1, q99 = np.percentile(vd[feat], 1), np.percentile(vd[feat], 99)
+                    global_x_bounds[feat] = (q1 - (q99 - q1) * 0.25, q99 + (q99 - q1) * 0.25)
+
+        def get_shared_y(data, features):
+            max_y = 0
+            for f in features:
+                if f in data.columns:
+                    vd = data.dropna(subset=[f])
+                    if not vd.empty:
+                        cnts, _ = np.histogram(vd[f], bins=15, weights=vd['Total_Qty'])
+                        max_y = max(max_y, cnts.max())
+            return max_y * 1.35 if max_y > 0 else 50
+
+        def plot_dist(ax, data, feat, title, y_lim):
+            c_map = {'A-B+': '#2ca02c', 'A-B': '#1f77b4', 'A-B-': '#ff7f0e', 'B+': '#9467bd', 'B': '#d62728'}
+            spec = GLOBAL_SPECS.get(feat, {})
+            lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
+
+            fmin, fmax = global_x_bounds.get(feat, (data[feat].min() if not data.empty else 0, data[feat].max() if not data.empty else 100))
+            if fmin == fmax: fmax += 1
+            
+            v_l, w_l, clrs, m_info = [], [], [], []
+            for g in base_grades:
+                if g in data.columns:
+                    td = data[[feat, g]].dropna()
+                    td = td[td[g] > 0]
+                    if not td.empty:
+                        v_l.append(td[feat].values)
+                        w_l.append(td[g].values)
+                        clrs.append(c_map[g])
+                        m = np.average(td[feat].values, weights=td[g].values)
+                        ax.axvline(m, color=c_map[g], ls='--', lw=1.2)
+                        m_info.append({'v': m, 'c': c_map[g], 'label': g})
+
+            if v_l:
+                ax.hist(v_l, bins=np.linspace(fmin, fmax, 16), weights=w_l, color=clrs, stacked=True, edgecolor='white', alpha=0.7)
+                
+                # Annotation positioning to prevent overlapping
+                m_info.sort(key=lambda x: x['v'])
+                x_range = fmax - fmin
+                min_gap = x_range * 0.045
+                positions = [info['v'] for info in m_info]
+                for _ in range(50):
+                    moved = False
+                    for i in range(1, len(positions)):
+                        if positions[i] - positions[i - 1] < min_gap:
+                            mid = (positions[i] + positions[i - 1]) / 2
+                            positions[i - 1] = mid - min_gap / 2
+                            positions[i] = mid + min_gap / 2
+                            moved = True
+                    if not moved: break
+                
+                y_levels = [y_lim * (0.92 - (i % 4) * 0.13) for i in range(len(m_info))]
+                for i, info in enumerate(m_info):
+                    x_pos = positions[i]
+                    y_pos = y_levels[i]
+                    ax.annotate(
+                        f"{info['v']:.1f}",
+                        xy=(info['v'], y_pos * 0.6), xytext=(x_pos, y_pos),
+                        color='white', fontweight='bold', fontsize=8, ha='center', va='center',
+                        bbox=dict(facecolor=info['c'], alpha=0.85, boxstyle='round,pad=0.25'),
+                        arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
+                    )
+
+            y_top = y_lim * 0.98
+            if lsl is not None:
+                ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
+                ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
+            if usl is not None:
+                ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
+                ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
+            if tgt is not None:
+                ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
+                ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
+
+            ax.legend(handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
+                      loc='upper right', fontsize=7)
+            ax.set_xlim(fmin, fmax)
+            ax.set_ylim(0, y_lim)
+            ax.set_title(title, fontsize=10, fontweight='bold')
+            add_chart_border(ax)
+
+        # Build capability summary
+        ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
+        cap_summary_rows = []
+        for _p in ordered_periods:
+            _dfp = df[df['Time_Group'] == _p]
+            for _f in ['YS', 'TS', 'EL', 'YPE']:
+                if _f in _dfp.columns:
+                    row = build_capability_summary(_dfp, _f, _p)
+                    if row: cap_summary_rows.append(row)
+
+        if cap_summary_rows:
+            cap_df = pd.DataFrame(cap_summary_rows)
+            
+            st.markdown("### 📋 Detailed Capability Log")
+            def color_cpk_cell(val):
+                if pd.isna(val): return ''
+                c = cpk_color(val)
+                return f'background-color:{c};color:white;font-weight:bold;text-align:center'
+
+            fmt = {
+                'Mean': '{:.2f}', 'Std': '{:.3f}', 'Cp': '{:.3f}', 'Cpk': '{:.3f}',
+                'Ca (%)': lambda v: f'{v:.1f}%' if pd.notnull(v) else '—',
+                'LSL': lambda v: str(v) if pd.notnull(v) else '—',
+                'USL': lambda v: str(v) if pd.notnull(v) else '—',
+            }
+            st.dataframe(
+                cap_df.style
+                .map(color_cpk_cell, subset=['Cpk'])
+                .format(fmt, na_rep='—'),
+                use_container_width=True, hide_index=True
+            )
+            st.markdown("---")
+
+        # Distribution Charts
+        thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
+        
+        for period in ordered_periods:
+            df_p = df[df['Time_Group'] == period]
+            if df_p.empty: continue
+            
+            st.markdown(f"## 📅 Period: **{period}**")
+            ov_y = get_shared_y(df_p, ['YS', 'TS', 'EL', 'YPE'])
+            cols = st.columns(2)
+            
+            for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
+                with cols[idx % 2]:
+                    fig, ax = plt.subplots(figsize=(8, 4.5))
+                    plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y)
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    
+                    vals_all = df_p[f].dropna().values
+                    render_capability_badge(calc_capability(vals_all, f), f)
+
+    # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
@@ -318,7 +585,7 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE (BEAUTIFIED) ---
+            # --- 1. HYBRID TREND LINE ---
             st.subheader("1. Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
@@ -453,7 +720,6 @@ if uploaded_file is not None:
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
 
-            # Sort Detail Table
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
             scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
 
@@ -474,6 +740,8 @@ if uploaded_file is not None:
             if not yield_summary.empty:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
             grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
+            if 'cap_summary_rows' in locals() and cap_summary_rows:
+                pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
             if 'trend_data' in locals() and not trend_data.empty:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
