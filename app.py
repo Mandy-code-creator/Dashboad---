@@ -109,13 +109,16 @@ if uploaded_file is not None:
 
     # Global Style Setup for Matplotlib charts
     sns.set_theme(style="whitegrid")
+    
+    # Custom Solid Colors for bar charts
+    solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
-    # LOGIC UPDATE: Custom Sorter to perfectly order periods and "Full Year" strings
+    # Custom Sorter for Time_Group to keep logical order
     def get_sort_key(x):
         if "2024 (Full Year)" in x: return "2024-00"
         if "2025 H1" in x: return "2025-00a"
         if "2025 Q3" in x: return "2025-00b"
-        if "2025 (Full Year)" in x: return "2025-99" # Keep at end of 2025, before 2026
+        if "2025 (Full Year)" in x: return "2025-99" 
         return x
 
     # --- TABS ---
@@ -232,8 +235,8 @@ if uploaded_file is not None:
                 chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
                 pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
-                    pivot_y.plot(kind='bar', ax=ax_y, colormap='Greens', edgecolor='white')
-                    # Fix Legend overlapping
+                    # Using bold categorical colors instead of Greens
+                    pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_y.set_ylim(0, 110)
             ax_y.set_ylabel("Yield (%)")
@@ -249,8 +252,8 @@ if uploaded_file is not None:
                 chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
                 pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
-                    pivot_d.plot(kind='bar', ax=ax_d, colormap='Reds', edgecolor='white')
-                    # Fix Legend overlapping
+                    # Using bold categorical colors instead of Reds
+                    pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_d.set_ylabel("Defect Rate (%)")
             ax_d.spines['top'].set_visible(False)
@@ -395,8 +398,8 @@ if uploaded_file is not None:
                 if not scrap_detail.empty:
                     pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_t.empty:
-                        pivot_t.plot(kind='bar', ax=ax_t, colormap='YlOrRd', edgecolor='white')
-                        # Fix Legend overlapping
+                        # Using bold categorical colors
+                        pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_t.set_ylabel("Scrap Rate (%)")
                 ax_t.spines['top'].set_visible(False)
@@ -410,8 +413,8 @@ if uploaded_file is not None:
                 if not scrap_detail.empty:
                     pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_m.empty:
-                        pivot_m.plot(kind='bar', ax=ax_m, colormap='Set2', edgecolor='white')
-                        # Fix Legend overlapping
+                        # Standard tab10 colormap for large number of materials
+                        pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_m.set_ylabel("Scrap Rate (%)")
                 ax_m.spines['top'].set_visible(False)
