@@ -17,7 +17,7 @@ if uploaded_file is not None:
     df.columns = df.columns.astype(str).str.strip()
 
     # --- 1. DATA PRE-PROCESSING ---
-    # Handle Thickness (Mapped to '厚度' from user's file)
+    # Handle Thickness
     if 'Actual_Thickness' not in df.columns:
         if 'Thickness' in df.columns:
             df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
@@ -30,9 +30,12 @@ if uploaded_file is not None:
                     break
     
     if 'Actual_Thickness' in df.columns:
-        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce').round(3)
+        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce').round(2)
     else:
         df['Actual_Thickness'] = 0.0
+
+    # FILTER: Only keep thickness 0.5, 0.6, and 0.8
+    df = df[df['Actual_Thickness'].isin([0.5, 0.6, 0.8])]
 
     # Handle Material
     if '熱軋材質' in df.columns:
@@ -58,7 +61,7 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Quality Grade Mapping (Adapted for columns like 'A-B+個數')
+    # Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = [c for c in df.columns if c == g or c == f"{g}個數" or str(c).startswith(f"{g}.")]
@@ -68,6 +71,17 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
+    # Pre-clean Length and Scrap Columns to filter out completely empty/zero rows
+    LEN_COL = '實測長度'
+    SCRAP_COL = '尾料剔退'
+    if LEN_COL in df.columns:
+        df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
+    if SCRAP_COL in df.columns:
+        df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
+
+    # FILTER: Remove rows that have a long string of zeros (0 Qty AND 0 Length)
+    df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0)]
+
     # --- TABS ---
     tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
 
@@ -76,10 +90,10 @@ if uploaded_file is not None:
     # ==========================================================
     with tab0:
         st.header("Raw Data Inspection")
-        st.info("Review the uploaded data to ensure it was parsed correctly before proceeding with the analysis.")
+        st.info("Filtered for Thickness: 0.5, 0.6, 0.8. Rows with all zero values have been removed.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Total Rows", f"{len(df):,}")
+        col_m1.metric("Valid Rows", f"{len(df):,}")
         col_m2.metric("Total Columns", len(df.columns))
         
         if 'Production_Date' in df.columns and not df['Production_Date'].isna().all():
@@ -89,7 +103,7 @@ if uploaded_file is not None:
         else:
             col_m3.metric("Date Range", "N/A")
             
-        st.markdown("### Data Preview")
+        st.markdown("### Filtered Data Preview")
         st.dataframe(df, use_container_width=True)
 
     # ==========================================================
@@ -132,10 +146,10 @@ if uploaded_file is not None:
         
         grade_dist_pct = pd.DataFrame()
         for g in base_grades:
-            grade_dist_pct[f'{g} (%)'] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
+            grade_dist_pct[f'{g} (%)'] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(2)
             
         st.dataframe(
-            grade_dist_pct.style.format("{:.1f}%"), 
+            grade_dist_pct.style.format("{:.2f}%"), 
             use_container_width=True
         )
 
@@ -167,12 +181,8 @@ if uploaded_file is not None:
         st.header("Tail Scrap & Length Rejection Analysis")
         
         COIL_ID_COL = '鋼捲號碼'
-        LEN_COL = '實測長度'
-        SCRAP_COL = '尾料剔退'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
-            df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
             df[COIL_ID_COL] = df[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
             missing_mask = df[COIL_ID_COL].isna()
@@ -207,8 +217,9 @@ if uploaded_file is not None:
                 ax_trend.set_ylabel("Rejection Rate (%)")
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
                 
+                # Format annotation to 2 decimal places exactly
                 for i, val in enumerate(monthly_trend['Rejection_Rate (%)']):
-                    ax_trend.text(i, val + 0.1, f'{val}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
+                    ax_trend.text(i, val + 0.1, f'{val:.2f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
                 
                 plt.xticks(rotation=45)
             st.pyplot(fig_trend)
@@ -225,7 +236,7 @@ if uploaded_file is not None:
             
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
-                .format({'Total_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 'Scrap_Rate (%)': '{:.2f}%'}),
+                .format({'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
 
@@ -243,7 +254,7 @@ if uploaded_file is not None:
             
             st.dataframe(
                 scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges')
-                .format({'Total_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 'Scrap_Rate (%)': '{:.2f}%'}),
+                .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
 
