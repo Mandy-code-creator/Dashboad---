@@ -78,7 +78,7 @@ if uploaded_file is not None:
         df['Time_Group'] = df['Production_Date'].apply(categorize_period)
         df = df[df['Time_Group'] != "Other"]
         
-        # LOGIC UPDATE: Duplicate 2025 data to create a "2025 (Full Year)" summary row
+        # Duplicate 2025 data to create a "2025 (Full Year)" summary row
         df_25 = df[df['Production_Date'].dt.year == 2025].copy()
         if not df_25.empty:
             df_25['Time_Group'] = "2025 (Full Year)"
@@ -115,7 +115,7 @@ if uploaded_file is not None:
         if "2024 (Full Year)" in x: return "0"
         if "2025 H1" in x: return "1"
         if "2025 Q3" in x: return "2"
-        if "2025 (Full Year)" in x: return "99" # Push Full Year to the bottom of 2025
+        if "2025 (Full Year)" in x: return "99" 
         return x
 
     # --- TABS ---
@@ -180,7 +180,6 @@ if uploaded_file is not None:
         st.markdown("---")
         st.subheader("📊 Grade Distribution by Time Period (%)")
         
-        # Re-build the HTML Table Logic
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
@@ -230,11 +229,12 @@ if uploaded_file is not None:
             st.markdown("**Yield (%) by Period & Thickness**")
             fig_y, ax_y = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
-                # Exclude Full Year overlap from chart to avoid duplicated visual bars
                 chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
                 pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, colormap='Greens', edgecolor='white')
+                    # Fix Legend overlapping
+                    ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_y.set_ylim(0, 110)
             ax_y.set_ylabel("Yield (%)")
             ax_y.spines['top'].set_visible(False)
@@ -250,6 +250,8 @@ if uploaded_file is not None:
                 pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, colormap='Reds', edgecolor='white')
+                    # Fix Legend overlapping
+                    ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_d.set_ylabel("Defect Rate (%)")
             ax_d.spines['top'].set_visible(False)
             ax_d.spines['right'].set_visible(False)
@@ -265,7 +267,6 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            # Exclude the artificially generated "2025 (Full Year)" from Task 5 analysis
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
@@ -395,6 +396,8 @@ if uploaded_file is not None:
                     pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_t.empty:
                         pivot_t.plot(kind='bar', ax=ax_t, colormap='YlOrRd', edgecolor='white')
+                        # Fix Legend overlapping
+                        ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_t.set_ylabel("Scrap Rate (%)")
                 ax_t.spines['top'].set_visible(False)
                 ax_t.spines['right'].set_visible(False)
@@ -408,6 +411,8 @@ if uploaded_file is not None:
                     pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='Set2', edgecolor='white')
+                        # Fix Legend overlapping
+                        ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_m.set_ylabel("Scrap Rate (%)")
                 ax_m.spines['top'].set_visible(False)
                 ax_m.spines['right'].set_visible(False)
@@ -436,7 +441,7 @@ if uploaded_file is not None:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
             grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'trend_data' in locals() and not trend_data.empty:
-                trend_data.to_excel(writer, sheet_name='Trend_Data', index=False)
+                trend_data.drop(columns=['Sort_Date']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
         
