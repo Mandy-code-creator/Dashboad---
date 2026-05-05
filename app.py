@@ -71,7 +71,7 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
-    # Pre-clean Length and Scrap Columns to filter out completely empty/zero rows
+    # Pre-clean Length and Scrap Columns
     LEN_COL = '實測長度'
     SCRAP_COL = '尾料剔退'
     if LEN_COL in df.columns:
@@ -175,7 +175,7 @@ if uploaded_file is not None:
             st.pyplot(fig_d)
 
     # ==========================================================
-    # TASK 5: TAIL SCRAP & MONTHLY TREND (COIL-ID AWARE)
+    # TASK 5: TAIL SCRAP & HYBRID TREND (COIL-ID AWARE)
     # ==========================================================
     with tab5:
         st.header("Tail Scrap & Length Rejection Analysis")
@@ -197,28 +197,44 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. MONTHLY TREND LINE ---
-            st.subheader("1. Monthly Rejection Rate Trend (%)")
-            df_scrap_master['Year_Month'] = df_scrap_master['Production_Date'].dt.to_period('M').astype(str)
-            monthly_trend = df_scrap_master.groupby('Year_Month').agg(
+            # --- 1. HYBRID TREND LINE (Grouped before Q4 2025, Monthly onwards) ---
+            st.subheader("1. Rejection Rate Trend (%)")
+            
+            def hybrid_time_label(row):
+                d = row['Production_Date']
+                if pd.isnull(d): return "Unknown"
+                # From Oct 2025 onwards -> Monthly format
+                if d.year > 2025 or (d.year == 2025 and d.month >= 10):
+                    return d.strftime('%Y-%m')
+                # Before Oct 2025 -> Keep the old Time_Group (e.g., 2024 Full Year, 2025 Q1)
+                return row['Time_Group']
+                
+            df_scrap_master['Trend_Time'] = df_scrap_master.apply(hybrid_time_label, axis=1)
+            
+            # Aggregate data for the trend, and use 'min' Production_Date to sort chronologically
+            trend_data = df_scrap_master.groupby('Trend_Time').agg(
                 Input_Length=(LEN_COL, 'sum'),
-                Total_Scrap=(SCRAP_COL, 'sum')
+                Total_Scrap=(SCRAP_COL, 'sum'),
+                Sort_Date=('Production_Date', 'min')
             ).reset_index()
             
-            monthly_trend['Rejection_Rate (%)'] = (monthly_trend['Total_Scrap'] / monthly_trend['Input_Length'] * 100).round(2)
-            monthly_trend = monthly_trend.sort_values('Year_Month')
+            trend_data = trend_data[trend_data['Trend_Time'] != 'Unknown']
+            trend_data['Rejection_Rate (%)'] = (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100).round(2)
+            
+            # Sort chronologically based on the earliest date in that period
+            trend_data = trend_data.sort_values('Sort_Date')
 
             fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
-            if not monthly_trend.empty:
-                ax_trend.plot(monthly_trend['Year_Month'], monthly_trend['Rejection_Rate (%)'], 
+            if not trend_data.empty:
+                ax_trend.plot(trend_data['Trend_Time'], trend_data['Rejection_Rate (%)'], 
                               marker='o', linestyle='-', color='#1f77b4', linewidth=2, label='Rejection Rate %')
-                ax_trend.set_ylim(0, monthly_trend['Rejection_Rate (%)'].max() * 1.3 if not monthly_trend.empty else 10)
-                ax_trend.set_title("Monthly Rejection Rate Trend", fontweight='bold')
+                ax_trend.set_ylim(0, trend_data['Rejection_Rate (%)'].max() * 1.3 if not trend_data.empty else 10)
+                ax_trend.set_title("Rejection Rate Trend (Grouped before Q4 2025, Monthly onwards)", fontweight='bold')
                 ax_trend.set_ylabel("Rejection Rate (%)")
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
                 
                 # Format annotation to 2 decimal places exactly
-                for i, val in enumerate(monthly_trend['Rejection_Rate (%)']):
+                for i, val in enumerate(trend_data['Rejection_Rate (%)']):
                     ax_trend.text(i, val + 0.1, f'{val:.2f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
                 
                 plt.xticks(rotation=45)
@@ -269,8 +285,8 @@ if uploaded_file is not None:
             if not yield_summary.empty:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
             grade_dist_pct.to_excel(writer, sheet_name='Grade_Distribution')
-            if 'monthly_trend' in locals() and not monthly_trend.empty:
-                monthly_trend.to_excel(writer, sheet_name='Monthly_Trend', index=False)
+            if 'trend_data' in locals() and not trend_data.empty:
+                trend_data.drop(columns=['Sort_Date']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
         
