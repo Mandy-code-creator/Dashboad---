@@ -30,12 +30,33 @@ if uploaded_file is not None:
                     break
     
     if 'Actual_Thickness' in df.columns:
-        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce').round(2)
+        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
+        
+        # EXACT MAPPING LOGIC FOR ORDER THICKNESS
+        def map_thickness(val):
+            if pd.isna(val): return None
+            v = round(float(val), 2)
+            # Group 0.5mm
+            if v in [0.47, 0.50]: 
+                return 0.5
+            # Group 0.6mm
+            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: 
+                return 0.6
+            # Group 0.8mm
+            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: 
+                return 0.8
+            return None # Exclude everything else
+            
+        df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
+        
+        # Filter out rows that do not match our target thickness categories
+        df = df.dropna(subset=['Standard_Thickness'])
+        df['Actual_Thickness'] = df['Standard_Thickness']
+        df = df.drop(columns=['Standard_Thickness'])
     else:
         df['Actual_Thickness'] = 0.0
-
-    # FILTER: Only keep thickness 0.5, 0.6, and 0.8
-    df = df[df['Actual_Thickness'].isin([0.5, 0.6, 0.8])]
+        # If no thickness column exists, empty the dataframe to avoid errors
+        df = df.iloc[0:0]
 
     # Handle Material
     if '熱軋材質' in df.columns:
@@ -98,7 +119,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab0:
         st.header("Raw Data Inspection")
-        st.info("Filtered for Thickness: 0.5, 0.6, 0.8. Empty rows have been removed.")
+        st.info("Grouped Thickness: 0.5mm (0.47, 0.50), 0.6mm (0.53-0.60), 0.8mm (0.63-0.80). Unmatched and empty rows removed.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Valid Rows", f"{len(df):,}")
@@ -215,14 +236,12 @@ if uploaded_file is not None:
             
             trend_data = trend_data[trend_data['Time_Group'] != 'Unknown']
             
-            # Safe division to prevent inf/NaN
             trend_data['Rejection_Rate (%)'] = np.where(
                 trend_data['Input_Length'] > 0,
                 (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100),
                 0
             ).round(2)
             
-            # Alphabetical sorting maintains exact chronological order for this naming convention
             trend_data = trend_data.sort_values('Time_Group')
 
             fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
@@ -257,7 +276,6 @@ if uploaded_file is not None:
             
             scrap_by_period = scrap_by_period.sort_values('Time_Group')
             
-            # Period Chart
             fig_p, ax_p = plt.subplots(figsize=(10, 4))
             if not scrap_by_period.empty:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
@@ -287,7 +305,6 @@ if uploaded_file is not None:
             scrap_detail = scrap_detail[scrap_detail['Total_Length'] > 0]
             scrap_detail['Scrap_Rate (%)'] = (scrap_detail['Total_Scrap'] / scrap_detail['Total_Length'] * 100).round(2)
             
-            # Thickness and Material Charts
             col_t, col_m = st.columns(2)
             with col_t:
                 st.markdown("**Scrap Rate by Period & Thickness**")
