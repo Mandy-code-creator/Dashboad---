@@ -188,7 +188,7 @@ if uploaded_file is not None:
             st.info("No yield data available to display in this view.")
 
         st.markdown("---")
-        st.subheader("📊 Grade Distribution by Time Period (%)")
+        st.subheader("📊 2. Grade Distribution by Time Period (%)")
         
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
@@ -234,6 +234,32 @@ if uploaded_file is not None:
         
         st.markdown(html, unsafe_allow_html=True)
 
+        # STACKED BAR CHART FOR GRADE DISTRIBUTION
+        st.markdown("**📈 Grade Distribution Chart**")
+        fig_g, ax_g = plt.subplots(figsize=(12, 5))
+        if not grade_dist_display.empty:
+            # Color palette from Dark Green to Dark Red for grades
+            grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
+            grade_dist_display.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
+            
+            ax_g.set_ylabel("Percentage (%)")
+            ax_g.set_xlabel("")
+            ax_g.set_ylim(0, 105) # Extra space on top
+            ax_g.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+            add_chart_border(ax_g)
+            
+            # Add labels inside the stacked bars
+            for container in ax_g.containers:
+                # Only show labels for values > 3% to avoid overlapping in tiny sections
+                labels = [f"{v.get_height():.1f}%" if v.get_height() > 3.0 else "" for v in container]
+                ax_g.bar_label(container, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
+            
+            plt.xticks(rotation=30, ha='right')
+            fig_g.tight_layout()
+            st.pyplot(fig_g)
+
+        st.markdown("---")
+        st.subheader("3. Charts by Period & Thickness")
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Yield (%) by Period & Thickness**")
@@ -246,7 +272,9 @@ if uploaded_file is not None:
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_y.set_ylim(0, 110)
             ax_y.set_ylabel("Yield (%)")
+            ax_y.set_xlabel("")
             add_chart_border(ax_y)
+            plt.xticks(rotation=30, ha='right')
             fig_y.tight_layout()
             st.pyplot(fig_y)
             
@@ -260,7 +288,9 @@ if uploaded_file is not None:
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_d.set_ylabel("Defect Rate (%)")
+            ax_d.set_xlabel("")
             add_chart_border(ax_d)
+            plt.xticks(rotation=30, ha='right')
             fig_d.tight_layout()
             st.pyplot(fig_d)
 
@@ -288,7 +318,7 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE ---
+            # --- 1. HYBRID TREND LINE (BEAUTIFIED) ---
             st.subheader("1. Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
@@ -322,6 +352,7 @@ if uploaded_file is not None:
                 ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
                 ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
                 ax_trend.set_xlabel("")
+                
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.5)
                 ax_trend.grid(axis='x', visible=False)
                 
@@ -363,8 +394,8 @@ if uploaded_file is not None:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
                 ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
+                ax_p.set_xlabel("")
                 ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
-                
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
                     ax_p.annotate(f"{val:.2f}%", xy=(i, val), xytext=(0, 5), textcoords="offset points", ha='center', va='bottom', fontweight='bold')
                 
@@ -401,7 +432,9 @@ if uploaded_file is not None:
                         pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_t.set_ylabel("Scrap Rate (%)")
+                ax_t.set_xlabel("")
                 add_chart_border(ax_t)
+                plt.xticks(rotation=30, ha='right')
                 fig_t.tight_layout()
                 st.pyplot(fig_t)
 
@@ -414,7 +447,9 @@ if uploaded_file is not None:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_m.set_ylabel("Scrap Rate (%)")
+                ax_m.set_xlabel("")
                 add_chart_border(ax_m)
+                plt.xticks(rotation=30, ha='right')
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
 
