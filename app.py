@@ -20,7 +20,7 @@ if uploaded_file is not None:
     # Handle Thickness
     if 'Thickness' in df.columns:
         df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
-    elif '型式' in df.columns: 
+    else:
         for i, c in enumerate(df.columns):
             if '型式' in c and i > 0:
                 df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
@@ -28,6 +28,12 @@ if uploaded_file is not None:
     
     if 'Actual_Thickness' in df.columns:
         df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce').round(3)
+
+    # Handle Material
+    if '熱軋材質' in df.columns:
+        df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
+    else:
+        df['HR_Material'] = 'Unknown'
 
     # Handle Dates & Time Grouping
     date_key = '烤三生產日期' 
@@ -58,59 +64,99 @@ if uploaded_file is not None:
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
     # --- TABS ---
-    tab1, tab5 = st.tabs(["📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap Analysis"])
+    tab1, tab5 = st.tabs(["📋 Task 1: Quality Yield Overview", "✂️ Task 5: Tail Scrap Analysis"])
 
     # ==========================================================
-    # TASK 1: YIELD SUMMARY
+    # TASK 1: YIELD SUMMARY (LEVEL-BY-LEVEL)
     # ==========================================================
     with tab1:
-        st.header("Quality Yield Summary")
+        st.header("Executive Quality Yield Summary")
         
-        yield_summary = df.groupby(['Time_Group', 'Actual_Thickness'])[
+        # Level 1: Deep Drill-Down (Period -> Thickness -> Material)
+        st.subheader("1. Detailed Yield by Thickness & Material")
+        yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[
             ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']
         ].sum().reset_index()
         
+        yield_summary = yield_summary[yield_summary['Total_Qty'] > 0]
         yield_summary['Yield (%)'] = (yield_summary['Acceptable_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
+        yield_summary['Defect_Rate (%)'] = (yield_summary['Severe_Bad_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
         
         st.dataframe(
-            yield_summary.style.background_gradient(subset=['Yield (%)'], cmap='Greens'),
+            yield_summary.style
+                .background_gradient(subset=['Yield (%)'], cmap='Greens')
+                .background_gradient(subset=['Defect_Rate (%)'], cmap='Reds')
+                .format({
+                    'Actual_Thickness': '{:.2f}', 'Total_Qty': '{:.0f}',
+                    'Acceptable_Qty': '{:.0f}', 'Severe_Bad_Qty': '{:.0f}',
+                    'Yield (%)': '{:.2f}%', 'Defect_Rate (%)': '{:.2f}%'
+                }),
             use_container_width=True, hide_index=True
         )
 
-        st.subheader("Yield Performance Trend")
-        fig1, ax1 = plt.subplots(figsize=(10, 4))
-        if not yield_summary.empty:
-            pivot_yield = yield_summary.pivot(index='Time_Group', columns='Actual_Thickness', values='Yield (%)')
-            pivot_yield.plot(kind='bar', ax=ax1, edgecolor='white')
-        ax1.set_title("Yield (%) by Period & Thickness", fontweight='bold')
-        ax1.set_ylabel("Yield Percentage")
-        ax1.set_xlabel("Time Period")
-        st.pyplot(fig1)
+        # Level 2: Grade Distribution Percentage
+        st.markdown("---")
+        st.subheader("2. Grade Distribution by Time Period (%)")
+        grade_dist = df.groupby('Time_Group')[base_grades].sum()
+        grade_dist['Total'] = grade_dist.sum(axis=1)
+        
+        grade_dist_pct = pd.DataFrame()
+        for g in base_grades:
+            grade_dist_pct[f'{g} (%)'] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
+            
+        st.dataframe(
+            grade_dist_pct.style.format("{:.1f}%"), 
+            use_container_width=True
+        )
+
+        # Charts
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.markdown("**Yield (%) by Period & Thickness**")
+            fig_y, ax_y = plt.subplots(figsize=(8, 4))
+            pivot_y = yield_summary.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
+            pivot_y.plot(kind='bar', ax=ax_y, colormap='Greens', edgecolor='white')
+            ax_y.set_ylim(0, 110)
+            st.pyplot(fig_y)
+            
+        with col_c2:
+            st.markdown("**Defect Rate (%) by Period & Thickness**")
+            fig_d, ax_d = plt.subplots(figsize=(8, 4))
+            pivot_d = yield_summary.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
+            pivot_d.plot(kind='bar', ax=ax_d, colormap='Reds', edgecolor='white')
+            st.pyplot(fig_d)
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & MONTHLY TREND (COIL-ID AWARE)
     # ==========================================================
     with tab5:
-        st.header("Tail Scrap & Monthly Rejection Trend")
+        st.header("Tail Scrap & Length Rejection Analysis")
         
         COIL_ID_COL = '鋼捲號碼'
         LEN_COL = '實測長度'
         SCRAP_COL = '尾料剔退'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            # 1. Data Cleaning
             df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
             df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
+            df[COIL_ID_COL] = df[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
-            # 2. Coil-ID Aware Logic: Sum scrap all passes, count length first pass only
-            scrap_totals = df.groupby(COIL_ID_COL)[SCRAP_COL].sum().reset_index()
-            first_occurrence = df.sort_values('Production_Date').drop_duplicates(subset=[COIL_ID_COL])
+            # Prevent blank IDs from merging together
+            missing_mask = df[COIL_ID_COL].isna()
+            if missing_mask.any():
+                df.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df[missing_mask].index]
+
+            # Coil-ID Aware Logic
+            scrap_totals = df.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
+            first_occurrence = df.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             
-            df_scrap_master = first_occurrence.merge(scrap_totals, on=COIL_ID_COL, suffixes=('_raw', ''))
-            
-            # 3. Monthly Trend Calculation
+            df_scrap_master = first_occurrence[['Time_Group', COIL_ID_COL, LEN_COL, 'Actual_Thickness', 'HR_Material', 'Production_Date']].merge(
+                scrap_totals, on=[COIL_ID_COL, 'Time_Group']
+            )
+
+            # --- 1. MONTHLY TREND LINE ---
+            st.subheader("1. Monthly Rejection Rate Trend (%)")
             df_scrap_master['Year_Month'] = df_scrap_master['Production_Date'].dt.to_period('M').astype(str)
-            
             monthly_trend = df_scrap_master.groupby('Year_Month').agg(
                 Input_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum')
@@ -119,15 +165,11 @@ if uploaded_file is not None:
             monthly_trend['Rejection_Rate (%)'] = (monthly_trend['Total_Scrap'] / monthly_trend['Input_Length'] * 100).round(2)
             monthly_trend = monthly_trend.sort_values('Year_Month')
 
-            # --- TREND LINE CHART (Based on image_116c1b.png) ---
-            st.subheader("Monthly Rejection Rate Trend (%)")
-            fig_trend, ax_trend = plt.subplots(figsize=(12, 5))
-            
+            fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
             ax_trend.plot(monthly_trend['Year_Month'], monthly_trend['Rejection_Rate (%)'], 
                           marker='o', linestyle='-', color='#1f77b4', linewidth=2, label='Rejection Rate %')
-            
             ax_trend.set_ylim(0, monthly_trend['Rejection_Rate (%)'].max() * 1.3 if not monthly_trend.empty else 10)
-            ax_trend.set_title("Monthly Rejection Rate Trend", fontweight='bold', fontsize=14)
+            ax_trend.set_title("Monthly Rejection Rate Trend", fontweight='bold')
             ax_trend.set_ylabel("Rejection Rate (%)")
             ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
             
@@ -135,38 +177,60 @@ if uploaded_file is not None:
                 ax_trend.text(i, val + 0.1, f'{val}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
             
             plt.xticks(rotation=45)
-            ax_trend.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=1)
             st.pyplot(fig_trend)
 
-            # --- PERIOD SUMMARY TABLE ---
-            st.subheader("Scrap Performance by Period")
-            scrap_summary = df_scrap_master.groupby('Time_Group').agg(
-                Input_Length=(LEN_COL, 'sum'),
+            # --- 2. PERIOD SUMMARY ---
+            st.markdown("---")
+            st.subheader("2. Scrap Rate by Time Period")
+            scrap_by_period = df_scrap_master.groupby('Time_Group').agg(
+                Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
                 Coil_Count=(COIL_ID_COL, 'count')
             ).reset_index()
-            scrap_summary['Scrap_Rate (%)'] = (scrap_summary['Total_Scrap'] / scrap_summary['Input_Length'] * 100).round(3)
+            scrap_by_period['Scrap_Rate (%)'] = (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100).round(2)
             
             st.dataframe(
-                scrap_summary.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
+                scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
+                .format({'Total_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
+
+            # --- 3. LEVEL-BY-LEVEL DRILL DOWN (Period -> Thickness -> Material) ---
+            st.markdown("---")
+            st.subheader("3. Deep Analysis: Scrap Rate by Period / Thickness / Material")
+            scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum'),
+                Coil_Count=(COIL_ID_COL, 'count')
+            ).reset_index()
+            
+            scrap_detail = scrap_detail[scrap_detail['Total_Length'] > 0]
+            scrap_detail['Scrap_Rate (%)'] = (scrap_detail['Total_Scrap'] / scrap_detail['Total_Length'] * 100).round(2)
+            
+            st.dataframe(
+                scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges')
+                .format({'Total_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 'Scrap_Rate (%)': '{:.2f}%'}),
+                use_container_width=True, hide_index=True
+            )
+
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
 
-    # --- EXPORT ---
-    st.sidebar.header("Export Report")
+    # --- GLOBAL EXPORT ---
+    st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            yield_summary.to_excel(writer, sheet_name='Yield_Report', index=False)
-            if 'scrap_summary' in locals():
-                scrap_summary.to_excel(writer, sheet_name='Period_Scrap_Report', index=False)
+            yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
+            grade_dist_pct.to_excel(writer, sheet_name='Grade_Distribution')
             if 'monthly_trend' in locals():
-                monthly_trend.to_excel(writer, sheet_name='Monthly_Trend_Report', index=False)
+                monthly_trend.to_excel(writer, sheet_name='Monthly_Trend', index=False)
+                scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
+                scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
+        
         st.sidebar.download_button(
-            label="📥 Download Excel",
+            label="📥 Download Full Excel",
             data=output.getvalue(),
-            file_name="Quality_Scrap_Summary.xlsx",
+            file_name="Quality_Scrap_Deep_Analysis.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
