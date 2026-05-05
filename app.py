@@ -110,12 +110,12 @@ if uploaded_file is not None:
     # Global Style Setup for Matplotlib charts
     sns.set_theme(style="whitegrid")
 
-    # Custom Sorter for Time_Group to keep logical order
+    # LOGIC UPDATE: Custom Sorter to perfectly order periods and "Full Year" strings
     def get_sort_key(x):
-        if "2024 (Full Year)" in x: return "0"
-        if "2025 H1" in x: return "1"
-        if "2025 Q3" in x: return "2"
-        if "2025 (Full Year)" in x: return "99" 
+        if "2024 (Full Year)" in x: return "2024-00"
+        if "2025 H1" in x: return "2025-00a"
+        if "2025 Q3" in x: return "2025-00b"
+        if "2025 (Full Year)" in x: return "2025-99" # Keep at end of 2025, before 2026
         return x
 
     # --- TABS ---
@@ -441,7 +441,7 @@ if uploaded_file is not None:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
             grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'trend_data' in locals() and not trend_data.empty:
-                trend_data.drop(columns=['Sort_Date']).to_excel(writer, sheet_name='Trend_Data', index=False)
+                trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
         
