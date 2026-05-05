@@ -45,17 +45,15 @@ if uploaded_file is not None:
             # Group 0.8mm
             if v in [0.63, 0.75, 0.76, 0.77, 0.80]: 
                 return 0.8
-            return None # Exclude everything else
+            return None 
             
         df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
         
-        # Filter out rows that do not match our target thickness categories
         df = df.dropna(subset=['Standard_Thickness'])
         df['Actual_Thickness'] = df['Standard_Thickness']
         df = df.drop(columns=['Standard_Thickness'])
     else:
         df['Actual_Thickness'] = 0.0
-        # If no thickness column exists, empty the dataframe to avoid errors
         df = df.iloc[0:0]
 
     # Handle Material
@@ -64,7 +62,7 @@ if uploaded_file is not None:
     else:
         df['HR_Material'] = 'Unknown'
 
-    # Handle Dates & Time Grouping (Old milestones before Q4 2025, Monthly onwards)
+    # Handle Dates & Time Grouping
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -80,7 +78,6 @@ if uploaded_file is not None:
             if y == 2025:
                 if d < q3_s: return "2025 H1 (Until 06/28)"
                 if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
-                # From Oct 2025 onwards: explicitly categorize by month
                 return d.strftime('%Y-%m')
             if y >= 2026:
                 return d.strftime('%Y-%m')
@@ -111,6 +108,9 @@ if uploaded_file is not None:
     # FILTER: Prevent dropping rows that have 0 length but contain Scrap data
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
+    # Global Style Setup for nicer Matplotlib charts
+    sns.set_theme(style="whitegrid")
+
     # --- TABS ---
     tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
 
@@ -136,12 +136,11 @@ if uploaded_file is not None:
         st.dataframe(df, use_container_width=True)
 
     # ==========================================================
-    # TASK 1: YIELD SUMMARY (LEVEL-BY-LEVEL)
+    # TASK 1: YIELD SUMMARY
     # ==========================================================
     with tab1:
         st.header("Executive Quality Yield Summary")
         
-        # Level 1: Deep Drill-Down
         st.subheader("1. Detailed Yield by Thickness & Material")
         yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[
             ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']
@@ -167,7 +166,6 @@ if uploaded_file is not None:
         else:
             st.info("No yield data available to display in this view.")
 
-        # Level 2: Grade Distribution
         st.markdown("---")
         st.subheader("2. Grade Distribution by Time Period (%)")
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
@@ -182,7 +180,6 @@ if uploaded_file is not None:
             use_container_width=True
         )
 
-        # Charts
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Yield (%) by Period & Thickness**")
@@ -192,6 +189,10 @@ if uploaded_file is not None:
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, colormap='Greens', edgecolor='white')
             ax_y.set_ylim(0, 110)
+            ax_y.set_ylabel("Yield (%)")
+            ax_y.spines['top'].set_visible(False)
+            ax_y.spines['right'].set_visible(False)
+            fig_y.tight_layout()
             st.pyplot(fig_y)
             
         with col_c2:
@@ -201,10 +202,14 @@ if uploaded_file is not None:
                 pivot_d = yield_summary.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, colormap='Reds', edgecolor='white')
+            ax_d.set_ylabel("Defect Rate (%)")
+            ax_d.spines['top'].set_visible(False)
+            ax_d.spines['right'].set_visible(False)
+            fig_d.tight_layout()
             st.pyplot(fig_d)
 
     # ==========================================================
-    # TASK 5: TAIL SCRAP & HYBRID TREND (COIL-ID AWARE)
+    # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
         st.header("Tail Scrap & Length Rejection Analysis")
@@ -218,7 +223,6 @@ if uploaded_file is not None:
             if missing_mask.any():
                 df.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df[missing_mask].index]
 
-            # Coil-ID Aware Logic
             scrap_totals = df.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
             first_occurrence = df.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             
@@ -226,7 +230,7 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE ---
+            # --- 1. HYBRID TREND LINE (BEAUTIFIED) ---
             st.subheader("1. Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
@@ -244,19 +248,48 @@ if uploaded_file is not None:
             
             trend_data = trend_data.sort_values('Time_Group')
 
-            fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
+            fig_trend, ax_trend = plt.subplots(figsize=(14, 5))
             if not trend_data.empty:
+                # Plot with thicker line, bigger markers, and white edges for pop
                 ax_trend.plot(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
-                              marker='o', linestyle='-', color='#1f77b4', linewidth=2, label='Rejection Rate %')
-                ax_trend.set_ylim(0, trend_data['Rejection_Rate (%)'].max() * 1.3 + 0.1 if not trend_data.empty else 10)
-                ax_trend.set_title("Rejection Rate Trend", fontweight='bold')
-                ax_trend.set_ylabel("Rejection Rate (%)")
-                ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
+                              marker='o', markersize=8, markeredgecolor='white', markeredgewidth=1.5,
+                              linestyle='-', color='#1f77b4', linewidth=3, label='Rejection Rate %')
                 
+                # Add subtle shading under the line
+                ax_trend.fill_between(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
+                                      color='#1f77b4', alpha=0.1)
+
+                # Set Y-axis limit with padding for annotations
+                y_max = trend_data['Rejection_Rate (%)'].max()
+                ax_trend.set_ylim(0, y_max * 1.35 + 0.5 if not trend_data.empty else 10)
+                
+                # Clean up labels and title
+                ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
+                ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
+                ax_trend.set_xlabel("")
+                
+                # Subtle Grid and removed spines
+                ax_trend.grid(axis='y', linestyle='--', alpha=0.5)
+                ax_trend.grid(axis='x', visible=False)
+                ax_trend.spines['top'].set_visible(False)
+                ax_trend.spines['right'].set_visible(False)
+                ax_trend.spines['left'].set_color('#ddd')
+                ax_trend.spines['bottom'].set_color('#ddd')
+                
+                # Enhanced Data Labels (Bbox with rounded corners)
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
-                    ax_trend.text(i, val + 0.1, f'{val:.2f}%', ha='center', va='bottom', fontsize=10, fontweight='bold')
+                    ax_trend.annotate(f'{val:.2f}%', 
+                                      xy=(i, val), 
+                                      xytext=(0, 8), 
+                                      textcoords="offset points", 
+                                      ha='center', va='bottom', 
+                                      fontsize=10, fontweight='bold', color='#222',
+                                      bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
                 
-                plt.xticks(rotation=45)
+                # X-axis Tick Rotation and Alignment
+                plt.xticks(rotation=40, ha='right', fontsize=10)
+                fig_trend.tight_layout()
+                
             st.pyplot(fig_trend)
 
             # --- 2. PERIOD SUMMARY & CHART ---
@@ -281,10 +314,13 @@ if uploaded_file is not None:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
                 ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
+                ax_p.spines['top'].set_visible(False)
+                ax_p.spines['right'].set_visible(False)
                 ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
-                    ax_p.text(i, val + 0.05, f"{val:.2f}%", ha='center', va='bottom', fontweight='bold')
-                plt.xticks(rotation=30)
+                    ax_p.annotate(f"{val:.2f}%", xy=(i, val), xytext=(0, 5), textcoords="offset points", ha='center', va='bottom', fontweight='bold')
+                plt.xticks(rotation=30, ha='right')
+                fig_p.tight_layout()
             st.pyplot(fig_p)
 
             st.dataframe(
@@ -314,6 +350,9 @@ if uploaded_file is not None:
                     if not pivot_t.empty:
                         pivot_t.plot(kind='bar', ax=ax_t, colormap='YlOrRd', edgecolor='white')
                 ax_t.set_ylabel("Scrap Rate (%)")
+                ax_t.spines['top'].set_visible(False)
+                ax_t.spines['right'].set_visible(False)
+                fig_t.tight_layout()
                 st.pyplot(fig_t)
 
             with col_m:
@@ -324,6 +363,9 @@ if uploaded_file is not None:
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='Set2', edgecolor='white')
                 ax_m.set_ylabel("Scrap Rate (%)")
+                ax_m.spines['top'].set_visible(False)
+                ax_m.spines['right'].set_visible(False)
+                fig_m.tight_layout()
                 st.pyplot(fig_m)
 
             st.dataframe(
