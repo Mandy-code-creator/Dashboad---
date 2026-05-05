@@ -43,7 +43,7 @@ if uploaded_file is not None:
     else:
         df['HR_Material'] = 'Unknown'
 
-    # Handle Dates & Time Grouping
+    # Handle Dates & Time Grouping (Old milestones before Q4 2025, Monthly onwards)
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -52,11 +52,19 @@ if uploaded_file is not None:
         def categorize_period(d):
             if pd.isnull(d): return "Unknown"
             y = d.year
-            if y == 2024: return "2024 (Full Year)"
-            if y == 2025: return f"2025 Q{(d.month-1)//3 + 1}"
-            if y == 2026: return "2026 Q1"
+            q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
+            
+            if y == 2024: 
+                return "2024 (Full Year)"
+            if y == 2025:
+                if d < q3_s: return "2025 H1 (Until 06/28)"
+                if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
+                # From Oct 2025 onwards: explicitly categorize by month
+                return d.strftime('%Y-%m')
+            if y >= 2026:
+                return d.strftime('%Y-%m')
             return "Other"
-        
+            
         df['Time_Group'] = df['Production_Date'].apply(categorize_period)
     else:
         df['Time_Group'] = "Unknown"
@@ -79,8 +87,8 @@ if uploaded_file is not None:
     if SCRAP_COL in df.columns:
         df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
 
-    # FILTER: Remove rows that have a long string of zeros (0 Qty AND 0 Length)
-    df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0)]
+    # FILTER: Prevent dropping rows that have 0 length but contain Scrap data
+    df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
     # --- TABS ---
     tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
@@ -90,7 +98,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab0:
         st.header("Raw Data Inspection")
-        st.info("Filtered for Thickness: 0.5, 0.6, 0.8. Rows with all zero values have been removed.")
+        st.info("Filtered for Thickness: 0.5, 0.6, 0.8. Empty rows have been removed.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
         col_m1.metric("Valid Rows", f"{len(df):,}")
@@ -200,31 +208,29 @@ if uploaded_file is not None:
             # --- 1. HYBRID TREND LINE ---
             st.subheader("1. Rejection Rate Trend (%)")
             
-            def hybrid_time_label(row):
-                d = row['Production_Date']
-                if pd.isnull(d): return "Unknown"
-                if d.year > 2025 or (d.year == 2025 and d.month >= 10):
-                    return d.strftime('%Y-%m')
-                return row['Time_Group']
-                
-            df_scrap_master['Trend_Time'] = df_scrap_master.apply(hybrid_time_label, axis=1)
-            
-            trend_data = df_scrap_master.groupby('Trend_Time').agg(
+            trend_data = df_scrap_master.groupby('Time_Group').agg(
                 Input_Length=(LEN_COL, 'sum'),
-                Total_Scrap=(SCRAP_COL, 'sum'),
-                Sort_Date=('Production_Date', 'min')
+                Total_Scrap=(SCRAP_COL, 'sum')
             ).reset_index()
             
-            trend_data = trend_data[trend_data['Trend_Time'] != 'Unknown']
-            trend_data['Rejection_Rate (%)'] = (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100).round(2)
-            trend_data = trend_data.sort_values('Sort_Date')
+            trend_data = trend_data[trend_data['Time_Group'] != 'Unknown']
+            
+            # Safe division to prevent inf/NaN
+            trend_data['Rejection_Rate (%)'] = np.where(
+                trend_data['Input_Length'] > 0,
+                (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100),
+                0
+            ).round(2)
+            
+            # Alphabetical sorting maintains exact chronological order for this naming convention
+            trend_data = trend_data.sort_values('Time_Group')
 
             fig_trend, ax_trend = plt.subplots(figsize=(12, 4))
             if not trend_data.empty:
-                ax_trend.plot(trend_data['Trend_Time'], trend_data['Rejection_Rate (%)'], 
+                ax_trend.plot(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
                               marker='o', linestyle='-', color='#1f77b4', linewidth=2, label='Rejection Rate %')
-                ax_trend.set_ylim(0, trend_data['Rejection_Rate (%)'].max() * 1.3 if not trend_data.empty else 10)
-                ax_trend.set_title("Rejection Rate Trend (Grouped before Q4 2025, Monthly onwards)", fontweight='bold')
+                ax_trend.set_ylim(0, trend_data['Rejection_Rate (%)'].max() * 1.3 + 0.1 if not trend_data.empty else 10)
+                ax_trend.set_title("Rejection Rate Trend", fontweight='bold')
                 ax_trend.set_ylabel("Rejection Rate (%)")
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.6)
                 
@@ -242,7 +248,14 @@ if uploaded_file is not None:
                 Total_Scrap=(SCRAP_COL, 'sum'),
                 Coil_Count=(COIL_ID_COL, 'count')
             ).reset_index()
-            scrap_by_period['Scrap_Rate (%)'] = (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100).round(2)
+            
+            scrap_by_period['Scrap_Rate (%)'] = np.where(
+                scrap_by_period['Total_Length'] > 0,
+                (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100),
+                0
+            ).round(2)
+            
+            scrap_by_period = scrap_by_period.sort_values('Time_Group')
             
             # Period Chart
             fig_p, ax_p = plt.subplots(figsize=(10, 4))
@@ -250,9 +263,10 @@ if uploaded_file is not None:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
                 ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
-                ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2)
+                ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
                     ax_p.text(i, val + 0.05, f"{val:.2f}%", ha='center', va='bottom', fontweight='bold')
+                plt.xticks(rotation=30)
             st.pyplot(fig_p)
 
             st.dataframe(
@@ -313,7 +327,7 @@ if uploaded_file is not None:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
             grade_dist_pct.to_excel(writer, sheet_name='Grade_Distribution')
             if 'trend_data' in locals() and not trend_data.empty:
-                trend_data.drop(columns=['Sort_Date']).to_excel(writer, sheet_name='Trend_Data', index=False)
+                trend_data.to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
         
