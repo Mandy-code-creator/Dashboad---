@@ -69,7 +69,28 @@ if uploaded_file is not None:
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
     # --- TABS ---
-    tab1, tab5 = st.tabs(["📋 Task 1: Quality Yield Overview", "✂️ Task 5: Tail Scrap Analysis"])
+    tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
+
+    # ==========================================================
+    # TASK 0: RAW DATA INSPECTION
+    # ==========================================================
+    with tab0:
+        st.header("Raw Data Inspection")
+        st.info("Review the uploaded data to ensure it was parsed correctly before proceeding with the analysis.")
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Total Rows", f"{len(df):,}")
+        col_m2.metric("Total Columns", len(df.columns))
+        
+        if 'Production_Date' in df.columns and not df['Production_Date'].isna().all():
+            min_date = df['Production_Date'].min().strftime('%Y-%m-%d')
+            max_date = df['Production_Date'].max().strftime('%Y-%m-%d')
+            col_m3.metric("Date Range", f"{min_date} to {max_date}")
+        else:
+            col_m3.metric("Date Range", "N/A")
+            
+        st.markdown("### Data Preview")
+        st.dataframe(df, use_container_width=True)
 
     # ==========================================================
     # TASK 1: YIELD SUMMARY (LEVEL-BY-LEVEL)
@@ -118,7 +139,7 @@ if uploaded_file is not None:
             use_container_width=True
         )
 
-        # Charts (with safe checks to prevent crashes)
+        # Charts
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Yield (%) by Period & Thickness**")
