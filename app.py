@@ -36,15 +36,9 @@ if uploaded_file is not None:
         def map_thickness(val):
             if pd.isna(val): return None
             v = round(float(val), 2)
-            # Group 0.5mm
-            if v in [0.47, 0.50]: 
-                return 0.5
-            # Group 0.6mm
-            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: 
-                return 0.6
-            # Group 0.8mm
-            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: 
-                return 0.8
+            if v in [0.47, 0.50]: return 0.5
+            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
+            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
             return None 
             
         df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
@@ -73,17 +67,22 @@ if uploaded_file is not None:
             y = d.year
             q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
             
-            if y == 2024: 
-                return "2024 (Full Year)"
+            if y == 2024: return "2024 (Full Year)"
             if y == 2025:
                 if d < q3_s: return "2025 H1 (Until 06/28)"
                 if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
                 return d.strftime('%Y-%m')
-            if y >= 2026:
-                return d.strftime('%Y-%m')
+            if y >= 2026: return d.strftime('%Y-%m')
             return "Other"
             
         df['Time_Group'] = df['Production_Date'].apply(categorize_period)
+        df = df[df['Time_Group'] != "Other"]
+        
+        # LOGIC UPDATE: Duplicate 2025 data to create a "2025 (Full Year)" summary row
+        df_25 = df[df['Production_Date'].dt.year == 2025].copy()
+        if not df_25.empty:
+            df_25['Time_Group'] = "2025 (Full Year)"
+            df = pd.concat([df, df_25], ignore_index=True)
     else:
         df['Time_Group'] = "Unknown"
 
@@ -108,8 +107,16 @@ if uploaded_file is not None:
     # FILTER: Prevent dropping rows that have 0 length but contain Scrap data
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
-    # Global Style Setup for nicer Matplotlib charts
+    # Global Style Setup for Matplotlib charts
     sns.set_theme(style="whitegrid")
+
+    # Custom Sorter for Time_Group to keep logical order
+    def get_sort_key(x):
+        if "2024 (Full Year)" in x: return "0"
+        if "2025 H1" in x: return "1"
+        if "2025 Q3" in x: return "2"
+        if "2025 (Full Year)" in x: return "99" # Push Full Year to the bottom of 2025
+        return x
 
     # --- TABS ---
     tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
@@ -152,6 +159,10 @@ if uploaded_file is not None:
             yield_summary['Yield (%)'] = (yield_summary['Acceptable_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             yield_summary['Defect_Rate (%)'] = (yield_summary['Severe_Bad_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             
+            # Sort for display
+            yield_summary['_sort'] = yield_summary['Time_Group'].apply(get_sort_key)
+            yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
+
             st.dataframe(
                 yield_summary.style
                     .background_gradient(subset=['Yield (%)'], cmap='Greens')
@@ -167,25 +178,61 @@ if uploaded_file is not None:
             st.info("No yield data available to display in this view.")
 
         st.markdown("---")
-        st.subheader("2. Grade Distribution by Time Period (%)")
+        st.subheader("📊 Grade Distribution by Time Period (%)")
+        
+        # Re-build the HTML Table Logic
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
-        grade_dist_pct = pd.DataFrame()
+        grade_dist_display = pd.DataFrame()
         for g in base_grades:
-            grade_dist_pct[f'{g} (%)'] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(2)
-            
-        st.dataframe(
-            grade_dist_pct.style.format("{:.2f}%"), 
-            use_container_width=True
-        )
+            grade_dist_display[g] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
+        
+        # Sort chronologically
+        grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
+        grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'])
+        
+        grade_dist_pct_str = grade_dist_display.map(lambda x: f"{x:.1f}%")
+
+        header_color = "#1a3a5c"
+        alt_row_color = "#dce6f1"
+        html = f"""
+        <style>
+        .grade-table {{ width:100%; border-collapse:collapse; font-family:sans-serif; font-size:14px; margin-bottom:24px; }}
+        .grade-table th {{ background-color:{header_color}; color:white; padding:10px 16px; text-align:center; }}
+        .grade-table td {{ padding:9px 16px; text-align:center; border-bottom:1px solid #ccc; }}
+        .grade-table tr:nth-child(odd) td {{ background-color:{alt_row_color}; }}
+        .grade-table tr:nth-child(even) td {{ background-color:#ffffff; }}
+        .grade-table tr:hover td {{ background-color:#b8cce4; }}
+        </style>
+        <table class="grade-table">
+            <thead><tr><th>Time Period</th>{''.join(f'<th>{g}</th>' for g in base_grades)}</tr></thead>
+            <tbody>
+        """
+        for period, row in grade_dist_pct_str.iterrows():
+            html += "<tr>"
+            html += f"<td><b>{period}</b></td>"
+            for g in base_grades:
+                val = float(row[g].replace('%', ''))
+                if g in ['B+', 'B'] and val > 1.0:
+                    html += f'<td style="color:#c00000;font-weight:bold">{row[g]}</td>'
+                elif g in ['A-B+', 'A-B'] and val > 30.0:
+                    html += f'<td style="color:#2e7d32;font-weight:bold">{row[g]}</td>'
+                else:
+                    html += f'<td>{row[g]}</td>'
+            html += "</tr>"
+        html += "</tbody></table>"
+        
+        st.markdown(html, unsafe_allow_html=True)
 
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Yield (%) by Period & Thickness**")
             fig_y, ax_y = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
-                pivot_y = yield_summary.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
+                # Exclude Full Year overlap from chart to avoid duplicated visual bars
+                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
+                pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, colormap='Greens', edgecolor='white')
             ax_y.set_ylim(0, 110)
@@ -199,7 +246,8 @@ if uploaded_file is not None:
             st.markdown("**Defect Rate (%) by Period & Thickness**")
             fig_d, ax_d = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
-                pivot_d = yield_summary.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
+                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
+                pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, colormap='Reds', edgecolor='white')
             ax_d.set_ylabel("Defect Rate (%)")
@@ -217,14 +265,17 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df[COIL_ID_COL] = df[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
+            # Exclude the artificially generated "2025 (Full Year)" from Task 5 analysis
+            df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             
-            missing_mask = df[COIL_ID_COL].isna()
+            df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
+            
+            missing_mask = df_t5[COIL_ID_COL].isna()
             if missing_mask.any():
-                df.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df[missing_mask].index]
+                df_t5.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df_t5[missing_mask].index]
 
-            scrap_totals = df.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
-            first_occurrence = df.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
+            scrap_totals = df_t5.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
+            first_occurrence = df_t5.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             
             df_scrap_master = first_occurrence[['Time_Group', COIL_ID_COL, LEN_COL, 'Actual_Thickness', 'HR_Material', 'Production_Date']].merge(
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
@@ -246,29 +297,25 @@ if uploaded_file is not None:
                 0
             ).round(2)
             
-            trend_data = trend_data.sort_values('Time_Group')
+            trend_data['_sort'] = trend_data['Time_Group'].apply(get_sort_key)
+            trend_data = trend_data.sort_values('_sort').drop(columns=['_sort'])
 
             fig_trend, ax_trend = plt.subplots(figsize=(14, 5))
             if not trend_data.empty:
-                # Plot with thicker line, bigger markers, and white edges for pop
                 ax_trend.plot(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
                               marker='o', markersize=8, markeredgecolor='white', markeredgewidth=1.5,
                               linestyle='-', color='#1f77b4', linewidth=3, label='Rejection Rate %')
                 
-                # Add subtle shading under the line
                 ax_trend.fill_between(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
                                       color='#1f77b4', alpha=0.1)
 
-                # Set Y-axis limit with padding for annotations
                 y_max = trend_data['Rejection_Rate (%)'].max()
                 ax_trend.set_ylim(0, y_max * 1.35 + 0.5 if not trend_data.empty else 10)
                 
-                # Clean up labels and title
                 ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
                 ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
                 ax_trend.set_xlabel("")
                 
-                # Subtle Grid and removed spines
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.5)
                 ax_trend.grid(axis='x', visible=False)
                 ax_trend.spines['top'].set_visible(False)
@@ -276,7 +323,6 @@ if uploaded_file is not None:
                 ax_trend.spines['left'].set_color('#ddd')
                 ax_trend.spines['bottom'].set_color('#ddd')
                 
-                # Enhanced Data Labels (Bbox with rounded corners)
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
                     ax_trend.annotate(f'{val:.2f}%', 
                                       xy=(i, val), 
@@ -286,7 +332,6 @@ if uploaded_file is not None:
                                       fontsize=10, fontweight='bold', color='#222',
                                       bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
                 
-                # X-axis Tick Rotation and Alignment
                 plt.xticks(rotation=40, ha='right', fontsize=10)
                 fig_trend.tight_layout()
                 
@@ -307,7 +352,8 @@ if uploaded_file is not None:
                 0
             ).round(2)
             
-            scrap_by_period = scrap_by_period.sort_values('Time_Group')
+            scrap_by_period['_sort'] = scrap_by_period['Time_Group'].apply(get_sort_key)
+            scrap_by_period = scrap_by_period.sort_values('_sort').drop(columns=['_sort'])
             
             fig_p, ax_p = plt.subplots(figsize=(10, 4))
             if not scrap_by_period.empty:
@@ -368,6 +414,10 @@ if uploaded_file is not None:
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
 
+            # Sort Detail Table
+            scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
+            scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
+
             st.dataframe(
                 scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges')
                 .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
@@ -384,7 +434,7 @@ if uploaded_file is not None:
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             if not yield_summary.empty:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
-            grade_dist_pct.to_excel(writer, sheet_name='Grade_Distribution')
+            grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'trend_data' in locals() and not trend_data.empty:
                 trend_data.to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
