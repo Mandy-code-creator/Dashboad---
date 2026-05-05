@@ -121,6 +121,13 @@ if uploaded_file is not None:
         if "2025 (Full Year)" in x: return "2025-99" 
         return x
 
+    # HELPER FUNCTION: Add borders to charts
+    def add_chart_border(ax):
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color('#333333')
+            spine.set_linewidth(1.0)
+
     # --- TABS ---
     tab0, tab1, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "✂️ Task 5: Tail Scrap"])
 
@@ -235,13 +242,11 @@ if uploaded_file is not None:
                 chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
                 pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
-                    # Using bold categorical colors instead of Greens
                     pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_y.set_ylim(0, 110)
             ax_y.set_ylabel("Yield (%)")
-            ax_y.spines['top'].set_visible(False)
-            ax_y.spines['right'].set_visible(False)
+            add_chart_border(ax_y)
             fig_y.tight_layout()
             st.pyplot(fig_y)
             
@@ -252,12 +257,10 @@ if uploaded_file is not None:
                 chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
                 pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
-                    # Using bold categorical colors instead of Reds
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
             ax_d.set_ylabel("Defect Rate (%)")
-            ax_d.spines['top'].set_visible(False)
-            ax_d.spines['right'].set_visible(False)
+            add_chart_border(ax_d)
             fig_d.tight_layout()
             st.pyplot(fig_d)
 
@@ -285,7 +288,7 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE (BEAUTIFIED) ---
+            # --- 1. HYBRID TREND LINE ---
             st.subheader("1. Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
@@ -319,13 +322,8 @@ if uploaded_file is not None:
                 ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
                 ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
                 ax_trend.set_xlabel("")
-                
                 ax_trend.grid(axis='y', linestyle='--', alpha=0.5)
                 ax_trend.grid(axis='x', visible=False)
-                ax_trend.spines['top'].set_visible(False)
-                ax_trend.spines['right'].set_visible(False)
-                ax_trend.spines['left'].set_color('#ddd')
-                ax_trend.spines['bottom'].set_color('#ddd')
                 
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
                     ax_trend.annotate(f'{val:.2f}%', 
@@ -336,6 +334,7 @@ if uploaded_file is not None:
                                       fontsize=10, fontweight='bold', color='#222',
                                       bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
                 
+                add_chart_border(ax_trend)
                 plt.xticks(rotation=40, ha='right', fontsize=10)
                 fig_trend.tight_layout()
                 
@@ -364,11 +363,12 @@ if uploaded_file is not None:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
                 ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
-                ax_p.spines['top'].set_visible(False)
-                ax_p.spines['right'].set_visible(False)
                 ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
+                
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
                     ax_p.annotate(f"{val:.2f}%", xy=(i, val), xytext=(0, 5), textcoords="offset points", ha='center', va='bottom', fontweight='bold')
+                
+                add_chart_border(ax_p)
                 plt.xticks(rotation=30, ha='right')
                 fig_p.tight_layout()
             st.pyplot(fig_p)
@@ -398,12 +398,10 @@ if uploaded_file is not None:
                 if not scrap_detail.empty:
                     pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_t.empty:
-                        # Using bold categorical colors
                         pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_t.set_ylabel("Scrap Rate (%)")
-                ax_t.spines['top'].set_visible(False)
-                ax_t.spines['right'].set_visible(False)
+                add_chart_border(ax_t)
                 fig_t.tight_layout()
                 st.pyplot(fig_t)
 
@@ -413,12 +411,10 @@ if uploaded_file is not None:
                 if not scrap_detail.empty:
                     pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
                     if not pivot_m.empty:
-                        # Standard tab10 colormap for large number of materials
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
                 ax_m.set_ylabel("Scrap Rate (%)")
-                ax_m.spines['top'].set_visible(False)
-                ax_m.spines['right'].set_visible(False)
+                add_chart_border(ax_m)
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
 
