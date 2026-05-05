@@ -167,7 +167,7 @@ if uploaded_file is not None:
             col_m3.metric("Date Range", "N/A")
             
         st.markdown("### Filtered Data Preview")
-        st.dataframe(df.head(50), use_container_width=True) # Displaying first 50 for performance
+        st.dataframe(df.head(50), use_container_width=True)
 
     # ==========================================================
     # TASK 1: YIELD SUMMARY
@@ -280,7 +280,10 @@ if uploaded_file is not None:
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-            ax_y.set_ylim(0, 110)
+                    for c in ax_y.containers:
+                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
+                        ax_y.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+            ax_y.set_ylim(0, 125) 
             ax_y.set_ylabel("Yield (%)")
             ax_y.set_xlabel("")
             add_chart_border(ax_y)
@@ -297,6 +300,11 @@ if uploaded_file is not None:
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    for c in ax_d.containers:
+                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
+                        ax_d.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                    y_max = pivot_d.max().max() if not pivot_d.isna().all().all() else 10
+                    ax_d.set_ylim(0, y_max * 1.3 + 2)
             ax_d.set_ylabel("Defect Rate (%)")
             ax_d.set_xlabel("")
             add_chart_border(ax_d)
@@ -309,10 +317,15 @@ if uploaded_file is not None:
     # ==========================================================
     with tab3:
         st.header("📊 Distribution & Process Capability (SPC)")
-        st.info("Visualizing mechanical property distribution and capability indices (Cp, Cpk, Ca) based on your target limits.")
+        st.info("Visualizing mechanical property distribution and capability indices. Control Limits apply from Q4 2025 onwards.")
 
-        # --- CAPABILITY INDEX HELPERS ---
-        def calc_capability(values, feat):
+        def is_valid_for_control(period_label):
+            # Only evaluate limits if the string starts with "2025-10" or later dates (2025-11, 2026-01, etc.)
+            if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
+                return False
+            return True
+
+        def calc_capability(values, feat, period_label):
             vals = np.array(values, dtype=float)
             vals = vals[~np.isnan(vals)]
             if len(vals) < 2: return None
@@ -329,6 +342,9 @@ if uploaded_file is not None:
             result = {'mean': mu, 'std': std, 'n': len(vals),
                       'Cp': None, 'Cpk': None, 'Ca': None,
                       'LSL': lsl, 'USL': usl, 'Target': tgt}
+
+            if not is_valid_for_control(period_label):
+                return result
 
             if lsl is not None and usl is not None:
                 cp   = (usl - lsl) / (6 * std)
@@ -362,25 +378,32 @@ if uploaded_file is not None:
             if cpk >= 1.00: return '#ffa726'   
             return '#d62728'                   
 
-        def cpk_label(cpk):
+        def cpk_label(cpk, period_label):
+            if not is_valid_for_control(period_label): return 'Not Monitored'
             if cpk is None: return 'N/A'
             if cpk >= 1.67: return '✅ Excellent'
             if cpk >= 1.33: return '✅ Capable'
             if cpk >= 1.00: return '⚠️ Marginal'
             return '❌ Not Capable'
 
-        def render_capability_badge(cap, feat):
+        def render_capability_badge(cap, feat, period_label):
             if cap is None: return
-            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
-            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
-            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+            
             mu_v   = f"{cap['mean']:.2f}"
             std_v  = f"{cap['std']:.3f}"
-            clr    = cpk_color(cap['Cpk'])
-            lbl    = cpk_label(cap['Cpk'])
             
-            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
-            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+            if is_valid_for_control(period_label):
+                cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
+                cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
+                ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+                clr    = cpk_color(cap['Cpk'])
+                lbl    = cpk_label(cap['Cpk'], period_label)
+                lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
+                usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+            else:
+                cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+                clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
+                lsl_v, usl_v = '—', '—'
 
             html_badge = f"""
             <div style="background:#f8f9fa;border-left:5px solid {clr};
@@ -403,8 +426,17 @@ if uploaded_file is not None:
 
         def build_capability_summary(df_src, feat, label):
             vals = df_src[feat].dropna().values if feat in df_src.columns else []
-            cap = calc_capability(vals, feat)
+            cap = calc_capability(vals, feat, label)
             if cap is None: return None
+            
+            if not is_valid_for_control(label):
+                return {
+                    'Period': label, 'Feature': feat, 'n': cap['n'],
+                    'Mean': round(cap['mean'], 2), 'Std': round(cap['std'], 3),
+                    'LSL': None, 'USL': None, 'Ca (%)': None, 'Cp': None, 'Cpk': None,
+                    'Verdict': 'Not Monitored'
+                }
+
             return {
                 'Period': label,
                 'Feature': feat,
@@ -416,7 +448,7 @@ if uploaded_file is not None:
                 'Ca (%)': cap['Ca'],
                 'Cp': cap['Cp'],
                 'Cpk': cap['Cpk'],
-                'Verdict': cpk_label(cap['Cpk']).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
+                'Verdict': cpk_label(cap['Cpk'], label).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
             }
 
         global_x_bounds = {}
@@ -438,11 +470,9 @@ if uploaded_file is not None:
                         max_y = max(max_y, cnts.max())
             return max_y * 1.35 if max_y > 0 else 50
 
-        def plot_dist(ax, data, feat, title, y_lim):
+        def plot_dist(ax, data, feat, title, y_lim, period_label):
             c_map = {'A-B+': '#2ca02c', 'A-B': '#1f77b4', 'A-B-': '#ff7f0e', 'B+': '#9467bd', 'B': '#d62728'}
-            spec = GLOBAL_SPECS.get(feat, {})
-            lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
-
+            
             fmin, fmax = global_x_bounds.get(feat, (data[feat].min() if not data.empty else 0, data[feat].max() if not data.empty else 100))
             if fmin == fmax: fmax += 1
             
@@ -462,7 +492,6 @@ if uploaded_file is not None:
             if v_l:
                 ax.hist(v_l, bins=np.linspace(fmin, fmax, 16), weights=w_l, color=clrs, stacked=True, edgecolor='white', alpha=0.7)
                 
-                # Annotation positioning to prevent overlapping
                 m_info.sort(key=lambda x: x['v'])
                 x_range = fmax - fmin
                 min_gap = x_range * 0.045
@@ -489,16 +518,19 @@ if uploaded_file is not None:
                         arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
                     )
 
-            y_top = y_lim * 0.98
-            if lsl is not None:
-                ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
-                ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
-            if usl is not None:
-                ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
-                ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
-            if tgt is not None:
-                ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
-                ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
+            if is_valid_for_control(period_label):
+                spec = GLOBAL_SPECS.get(feat, {})
+                lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
+                y_top = y_lim * 0.98
+                if lsl is not None:
+                    ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
+                    ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
+                if usl is not None:
+                    ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
+                    ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
+                if tgt is not None:
+                    ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
+                    ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
 
             ax.legend(handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
                       loc='upper right', fontsize=7)
@@ -507,10 +539,10 @@ if uploaded_file is not None:
             ax.set_title(title, fontsize=10, fontweight='bold')
             add_chart_border(ax)
 
-        # Build capability summary
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
         cap_summary_rows = []
         for _p in ordered_periods:
+            if _p == "2025 (Full Year)": continue # Skip summary row for capability charts
             _dfp = df[df['Time_Group'] == _p]
             for _f in ['YS', 'TS', 'EL', 'YPE']:
                 if _f in _dfp.columns:
@@ -522,12 +554,17 @@ if uploaded_file is not None:
             
             st.markdown("### 📋 Detailed Capability Log")
             def color_cpk_cell(val):
-                if pd.isna(val): return ''
-                c = cpk_color(val)
-                return f'background-color:{c};color:white;font-weight:bold;text-align:center'
+                if pd.isna(val) or val == 'N/A' or val == '': return ''
+                try:
+                    c = cpk_color(float(val))
+                    return f'background-color:{c};color:white;font-weight:bold;text-align:center'
+                except:
+                    return ''
 
             fmt = {
-                'Mean': '{:.2f}', 'Std': '{:.3f}', 'Cp': '{:.3f}', 'Cpk': '{:.3f}',
+                'Mean': '{:.2f}', 'Std': '{:.3f}', 
+                'Cp': lambda v: f'{v:.3f}' if pd.notnull(v) else '—', 
+                'Cpk': lambda v: f'{v:.3f}' if pd.notnull(v) else '—',
                 'Ca (%)': lambda v: f'{v:.1f}%' if pd.notnull(v) else '—',
                 'LSL': lambda v: str(v) if pd.notnull(v) else '—',
                 'USL': lambda v: str(v) if pd.notnull(v) else '—',
@@ -540,26 +577,32 @@ if uploaded_file is not None:
             )
             st.markdown("---")
 
-        # Distribution Charts
         thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
         
         for period in ordered_periods:
+            if period == "2025 (Full Year)": continue
             df_p = df[df['Time_Group'] == period]
             if df_p.empty: continue
             
             st.markdown(f"## 📅 Period: **{period}**")
-            ov_y = get_shared_y(df_p, ['YS', 'TS', 'EL', 'YPE'])
-            cols = st.columns(2)
             
-            for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
-                with cols[idx % 2]:
-                    fig, ax = plt.subplots(figsize=(8, 4.5))
-                    plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y)
-                    fig.tight_layout()
-                    st.pyplot(fig)
-                    
-                    vals_all = df_p[f].dropna().values
-                    render_capability_badge(calc_capability(vals_all, f), f)
+            for thick in thickness_list:
+                df_t = df_p[df_p['Actual_Thickness'] == thick]
+                if df_t.empty: continue
+                
+                st.markdown(f"**📏 Thickness: {thick}mm**")
+                ly = get_shared_y(df_t, ['YS', 'TS', 'EL', 'YPE'])
+                tcols = st.columns(2)
+                
+                for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_t.columns]):
+                    with tcols[idx % 2]:
+                        fig, ax = plt.subplots(figsize=(8, 4.5))
+                        plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period)
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        
+                        vals_t = df_t[f].dropna().values
+                        render_capability_badge(calc_capability(vals_t, f, period), f, period)
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -698,6 +741,11 @@ if uploaded_file is not None:
                     if not pivot_t.empty:
                         pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        for c in ax_t.containers:
+                            labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
+                            ax_t.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                    y_max = pivot_t.max().max() if not pivot_t.isna().all().all() else 10
+                    ax_t.set_ylim(0, y_max * 1.3 + 2)
                 ax_t.set_ylabel("Scrap Rate (%)")
                 ax_t.set_xlabel("")
                 add_chart_border(ax_t)
@@ -713,6 +761,11 @@ if uploaded_file is not None:
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        for c in ax_m.containers:
+                            labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
+                            ax_m.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                    y_max = pivot_m.max().max() if not pivot_m.isna().all().all() else 10
+                    ax_m.set_ylim(0, y_max * 1.3 + 2)
                 ax_m.set_ylabel("Scrap Rate (%)")
                 ax_m.set_xlabel("")
                 add_chart_border(ax_m)
