@@ -108,6 +108,10 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
+    # STRICT FILTER FOR LIMIT CALCULATIONS: Only quality levels A or B (A-B+, A-B)
+    target_grades = ['A-B+', 'A-B']
+    df['Valid_Qty'] = df[target_grades].sum(axis=1)
+
     df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
     for f in mech_features:
@@ -140,7 +144,13 @@ if uploaded_file is not None:
             spine.set_linewidth(1.0)
 
     # --- TABS ---
-    tab0, tab1, tab3, tab5 = st.tabs(["📁 Task 0: Raw Data", "📋 Task 1: Quality Yield", "📈 Task 3: Capability", "✂️ Task 5: Tail Scrap"])
+    tab0, tab1, tab3, tab4, tab5 = st.tabs([
+        "📁 Task 0: Raw Data", 
+        "📋 Task 1: Quality Yield", 
+        "📈 Task 3: Capability", 
+        "📉 Task 4: I-MR Tracking",
+        "✂️ Task 5: Tail Scrap"
+    ])
 
     # ==========================================================
     # TASK 0: RAW DATA INSPECTION
@@ -311,7 +321,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab3:
         st.header("📊 Distribution & Process Capability (SPC)")
-        st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards, evaluated per thickness.")
+        st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards. Limit calculations strictly based on grades A or B (A-B+, A-B).")
 
         def is_valid_for_control(period_label):
             if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
@@ -322,7 +332,6 @@ if uploaded_file is not None:
             vals = np.array(values, dtype=float)
             vals = vals[~np.isnan(vals)]
             
-            # If "Overall" (mixed thicknesses), we cannot calculate a single Cpk.
             if thickness == 'Overall':
                 return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
                         'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
@@ -458,8 +467,9 @@ if uploaded_file is not None:
         global_x_bounds = {}
         for feat in ['YS', 'TS', 'EL', 'YPE']:
             if feat in df.columns:
-                vd = df[[feat, 'Total_Qty']].dropna().copy()
-                vd = vd[vd['Total_Qty'] > 0]
+                # Use Valid_Qty for Limit Calculations
+                vd = df[[feat, 'Valid_Qty']].dropna().copy()
+                vd = vd[vd['Valid_Qty'] > 0]
                 if not vd.empty:
                     q1, q99 = np.percentile(vd[feat], 1), np.percentile(vd[feat], 99)
                     global_x_bounds[feat] = (q1 - (q99 - q1) * 0.25, q99 + (q99 - q1) * 0.25)
@@ -550,8 +560,11 @@ if uploaded_file is not None:
         for _p in ordered_periods:
             if _p == "2025 (Full Year)": continue 
             _dfp = df[df['Time_Group'] == _p]
+            # Use Valid_Qty for Capability Log Table
+            _dfp_valid = _dfp[_dfp['Valid_Qty'] > 0]
+            
             for _t in thickness_list:
-                _dft = _dfp[_dfp['Actual_Thickness'] == _t]
+                _dft = _dfp_valid[_dfp_valid['Actual_Thickness'] == _t]
                 if _dft.empty: continue
                 for _f in ['YS', 'TS', 'EL', 'YPE']:
                     if _f in _dft.columns:
@@ -561,7 +574,7 @@ if uploaded_file is not None:
         if cap_summary_rows:
             cap_df = pd.DataFrame(cap_summary_rows)
             
-            st.markdown("### 📋 Detailed Capability Log (Per Thickness)")
+            st.markdown("### 📋 Detailed Capability Log (Per Thickness - Grades A-B+, A-B Only)")
             def color_cpk_cell(val):
                 if pd.isna(val) or val == 'N/A' or val == '': return ''
                 try:
@@ -594,7 +607,6 @@ if uploaded_file is not None:
             
             st.markdown(f"## 📅 Period: **{period}**")
             
-            # Overall distribution (No Control Limits drawn because it's mixed)
             ov_y = get_shared_y(df_p, ['YS', 'TS', 'EL', 'YPE'])
             st.markdown(f"#### 🌐 Overall Summary (All Thicknesses)")
             cols = st.columns(2)
@@ -604,10 +616,11 @@ if uploaded_file is not None:
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
-                    vals_all = df_p[f].dropna().values
+                    
+                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
+                    vals_all = df_p_valid[f].dropna().values
                     render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
             
-            # Specific thickness distribution
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
                 if df_t.empty: continue
@@ -623,9 +636,89 @@ if uploaded_file is not None:
                         fig.tight_layout()
                         st.pyplot(fig)
                         
-                        vals_t = df_t[f].dropna().values
+                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
+                        vals_t = df_t_valid[f].dropna().values
                         render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
             st.markdown("---")
+
+    # ==========================================================
+    # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
+    # ==========================================================
+    with tab4:
+        st.header("📉 Post-Control Tracking (I-MR Charts)")
+        st.info("Tracking process stability for production from 2026 onwards. Limits calculated ONLY based on grades A or B (A-B+, A-B).")
+        
+        df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
+        df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
+        
+        if df_t4.empty:
+            st.warning("No valid data available for 2026 onwards.")
+        else:
+            c1, c2 = st.columns(2)
+            t4_feat = c1.selectbox("Select Mechanical Feature:", ['YS', 'TS', 'EL', 'YPE'])
+            
+            thicknesses = ['Overall'] + sorted(df_t4['Actual_Thickness'].dropna().unique().tolist())
+            t4_thick = c2.selectbox("Select Thickness:", thicknesses)
+            
+            if t4_thick != 'Overall':
+                plot_df = df_t4[df_t4['Actual_Thickness'] == t4_thick]
+            else:
+                plot_df = df_t4
+                
+            plot_df = plot_df.sort_values('Production_Date').dropna(subset=[t4_feat])
+            
+            if len(plot_df) < 2:
+                st.warning("Not enough data points to plot I-MR chart for this selection.")
+            else:
+                dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
+                vals = plot_df[t4_feat].values
+                
+                mean_v = np.mean(vals)
+                mr = np.abs(np.diff(vals))
+                mr_mean = np.mean(mr)
+                
+                ucl_i = mean_v + 2.66 * mr_mean
+                lcl_i = max(0, mean_v - 2.66 * mr_mean)
+                ucl_mr = 3.267 * mr_mean
+                
+                fig_imr, (ax_i, ax_mr) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
+                
+                # I-Chart
+                ax_i.plot(vals, marker='o', color='#1f77b4', linestyle='-', linewidth=1.5, markersize=5)
+                ax_i.axhline(mean_v, color='green', linestyle='--', label=f'Mean: {mean_v:.2f}')
+                ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
+                ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
+                
+                out_i = np.where((vals > ucl_i) | (vals < lcl_i))[0]
+                if len(out_i) > 0:
+                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50)
+                    
+                ax_i.set_title(f"Individual (I) Chart - {t4_feat} ({t4_thick}mm)", fontweight='bold')
+                ax_i.set_ylabel("Value")
+                ax_i.legend(loc='upper right')
+                add_chart_border(ax_i)
+                ax_i.set_xticks([]) 
+                
+                # MR-Chart
+                ax_mr.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', linestyle='-', linewidth=1.5, markersize=5)
+                ax_mr.axhline(mr_mean, color='green', linestyle='--', label=f'MR Mean: {mr_mean:.2f}')
+                ax_mr.axhline(ucl_mr, color='red', linestyle='--', label=f'UCL: {ucl_mr:.2f}')
+                
+                out_mr = np.where(mr > ucl_mr)[0]
+                if len(out_mr) > 0:
+                    ax_mr.scatter(out_mr + 1, mr[out_mr], color='red', zorder=5, s=50)
+                    
+                ax_mr.set_title("Moving Range (MR) Chart", fontweight='bold')
+                ax_mr.set_ylabel("Range")
+                ax_mr.legend(loc='upper right')
+                add_chart_border(ax_mr)
+                
+                step = max(1, len(vals) // 15)
+                ax_mr.set_xticks(range(0, len(vals), step))
+                ax_mr.set_xticklabels(dates.iloc[::step], rotation=45, ha='right')
+                
+                fig_imr.tight_layout()
+                st.pyplot(fig_imr)
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -818,6 +911,8 @@ if uploaded_file is not None:
             grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'cap_summary_rows' in locals() and cap_summary_rows:
                 pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
+            if 'plot_df' in locals() and not plot_df.empty:
+                plot_df.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
             if 'trend_data' in locals() and not trend_data.empty:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
