@@ -936,113 +936,111 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer rejection rates based on Usage Month to validate the impact of the customer's machine upgrade.")
+        st.info("Analyzing customer scrap rates based on Usage Month using Task 5 logic to validate the impact of the customer's machine upgrade.")
         
         USAGE_COL = '使用月份'
         COIL_ID_COL = '鋼捲號碼'
         
-        if USAGE_COL in df.columns and COIL_ID_COL in df.columns:
+        if USAGE_COL in df.columns and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns:
             df_t6 = df.copy()
-            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip()
+            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip().replace(['nan', 'None', ''], np.nan)
+            df_t6 = df_t6.dropna(subset=[USAGE_COL])
             
-            st.markdown("### Data Mapping for Defect Calculation")
-            st.caption("Map the columns from your Excel file to calculate the accurate Total Length Diff: Total Input - (Total Output + Total Returned + Total Cut Scrap).")
+            df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
-            col_map1, col_map2, col_map3, col_map4 = st.columns(4)
-            avail_cols = ['None'] + list(df_t6.columns)
+            # --- 1. MACRO VIEW ---
+            st.subheader("Macro View: Customer Scrap Rate by Usage Month")
             
-            in_col = col_map1.selectbox("Total Input Column:", avail_cols, index=avail_cols.index(LEN_COL) if LEN_COL in avail_cols else 0)
-            out_col = col_map2.selectbox("Total Output Column:", avail_cols)
-            ret_col = col_map3.selectbox("Total Returned Column:", avail_cols)
-            scrap_col_t6 = col_map4.selectbox("Total Cut Scrap Column:", avail_cols, index=avail_cols.index(SCRAP_COL) if SCRAP_COL in avail_cols else 0)
+            macro_df = df_t6.groupby(USAGE_COL).agg(
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum')
+            ).reset_index()
             
-            upgrade_month = st.text_input("Enter the Machine Upgrade Month (e.g., '04' or '2026-04'):", value="04")
+            macro_df['Customer_Scrap_Rate (%)'] = np.where(
+                macro_df['Total_Length'] > 0, 
+                (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 
+                0
+            ).round(2)
             
-            if in_col != 'None':
-                df_t6['Total_Input'] = pd.to_numeric(df_t6[in_col], errors='coerce').fillna(0)
-                df_t6['Total_Output'] = pd.to_numeric(df_t6[out_col], errors='coerce').fillna(0) if out_col != 'None' else 0
-                df_t6['Total_Returned'] = pd.to_numeric(df_t6[ret_col], errors='coerce').fillna(0) if ret_col != 'None' else 0
-                df_t6['Total_Cut_Scrap'] = pd.to_numeric(df_t6[scrap_col_t6], errors='coerce').fillna(0) if scrap_col_t6 != 'None' else 0
+            macro_df = macro_df.sort_values(USAGE_COL)
+            
+            if not macro_df.empty:
+                fig_m, ax_m = plt.subplots(figsize=(12, 5))
+                ax_m.plot(macro_df[USAGE_COL], macro_df['Customer_Scrap_Rate (%)'], marker='o', lw=2, color='#d62728')
                 
-                # TOTAL LENGTH DIFF CALCULATION (Internal Logic)
-                df_t6['Total_Length_Diff'] = df_t6['Total_Input'] - (df_t6['Total_Output'] + df_t6['Total_Returned'] + df_t6['Total_Cut_Scrap'])
-                
-                df_t6['Customer_Defect_Qty'] = df_t6['Total_Returned'] + df_t6['Total_Length_Diff'] 
-                df_t6['Customer_Defect_Rate (%)'] = np.where(df_t6['Total_Input'] > 0, (df_t6['Customer_Defect_Qty'] / df_t6['Total_Input']) * 100, 0)
-                
-                df_t6 = df_t6[df_t6[USAGE_COL].str.len() >= 4]
-                df_t6 = df_t6.sort_values(USAGE_COL)
-                
-                # --- MACRO VIEW ---
-                st.markdown("---")
-                st.subheader("Macro View: Customer Defect Rate by Usage Month")
-                
-                macro_df = df_t6.groupby(USAGE_COL).agg({'Total_Input': 'sum', 'Customer_Defect_Qty': 'sum'}).reset_index()
-                macro_df['Customer_Defect_Rate (%)'] = np.where(macro_df['Total_Input'] > 0, (macro_df['Customer_Defect_Qty'] / macro_df['Total_Input']) * 100, 0)
-                
-                if not macro_df.empty:
-                    fig_m, ax_m = plt.subplots(figsize=(12, 5))
-                    ax_m.plot(macro_df[USAGE_COL], macro_df['Customer_Defect_Rate (%)'], marker='o', lw=2, color='#d62728')
+                # Highlight Machine Upgrade in April (04)
+                april_mask = macro_df[USAGE_COL].str.contains('04|4')
+                if april_mask.any():
+                    april_idx = macro_df[april_mask].index[0]
+                    ax_m.axvline(x=april_idx, color='blue', linestyle='--', lw=2, label='Machine Upgraded (April)')
                     
-                    if upgrade_month:
-                        april_mask = macro_df[USAGE_COL].str.contains(upgrade_month)
-                        if april_mask.any():
-                            april_idx = macro_df[april_mask].index[0]
-                            ax_m.axvline(x=april_idx, color='blue', linestyle='--', lw=2, label=f'Machine Upgraded ({upgrade_month})')
-                        
-                    ax_m.set_ylabel("Customer Defect Rate (%)")
-                    ax_m.set_title("Defect Rate Trend vs Machine Upgrade Timeline", fontweight='bold')
-                    ax_m.legend()
-                    add_chart_border(ax_m)
-                    plt.xticks(rotation=45)
-                    st.pyplot(fig_m)
-                
-                # --- MICRO VIEW (SPLIT COIL) ---
-                st.markdown("---")
-                st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
-                st.info("Identifying specific coils used in both periods to prove the defect variation is machine-dependent, not material-dependent.")
-                
-                def classify_period(m):
-                    if pd.isna(m): return 'Unknown'
-                    if str(upgrade_month) in str(m) or ('05' in str(m)) or ('06' in str(m)): 
-                        return 'After Upgrade'
-                    return 'Before Upgrade'
+                ax_m.set_ylabel("Customer Scrap Rate (%)")
+                ax_m.set_title("Scrap Rate Trend vs Machine Upgrade Timeline", fontweight='bold')
+                ax_m.legend()
+                add_chart_border(ax_m)
+                plt.xticks(rotation=45)
+                st.pyplot(fig_m)
+            
+            # --- 2. MICRO VIEW (SPLIT COIL) ---
+            st.markdown("---")
+            st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
+            st.info("Identifying specific coils used in both periods to prove the scrap variation is machine-dependent, not material-dependent.")
+            
+            def classify_period(m):
+                try:
+                    val = int(''.join(filter(str.isdigit, str(m))))
+                    if val >= 4:
+                        return 'After Upgrade (>= April)'
+                    else:
+                        return 'Before Upgrade (< April)'
+                except:
+                    if '04' in str(m) or '05' in str(m) or '06' in str(m):
+                         return 'After Upgrade (>= April)'
+                    return 'Before Upgrade (< April)'
                     
-                df_t6['Machine_Status'] = df_t6[USAGE_COL].apply(classify_period)
+            df_t6['Machine_Status'] = df_t6[USAGE_COL].apply(classify_period)
+            
+            coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg(
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum')
+            ).reset_index()
+            
+            coil_status_scrap['Scrap_Rate'] = np.where(
+                coil_status_scrap['Total_Length'] > 0, 
+                (coil_status_scrap['Total_Scrap'] / coil_status_scrap['Total_Length']) * 100, 
+                0
+            )
+            
+            coils_before = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'Before Upgrade (< April)'][COIL_ID_COL])
+            coils_after = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'After Upgrade (>= April)'][COIL_ID_COL])
+            split_coils = coils_before.intersection(coils_after)
+            
+            if split_coils:
+                split_df = coil_status_scrap[coil_status_scrap[COIL_ID_COL].isin(split_coils)]
+                split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate', aggfunc='mean')
                 
-                coils_before = set(df_t6[df_t6['Machine_Status'] == 'Before Upgrade'][COIL_ID_COL])
-                coils_after = set(df_t6[df_t6['Machine_Status'] == 'After Upgrade'][COIL_ID_COL])
-                split_coils = coils_before.intersection(coils_after)
-                
-                if split_coils:
-                    split_df = df_t6[df_t6[COIL_ID_COL].isin(split_coils)]
-                    split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Customer_Defect_Rate (%)', aggfunc='mean')
-                    
-                    if not split_pivot.empty:
-                        fig_s, ax_s = plt.subplots(figsize=(10, 5))
-                        split_pivot.plot(kind='bar', ax=ax_s, color=['#1f77b4', '#ff7f0e'], edgecolor='white')
-                        ax_s.set_ylabel("Defect Rate (%)")
-                        ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
-                        add_chart_border(ax_s)
-                        plt.xticks(rotation=45, ha='right')
-                        st.pyplot(fig_s)
-                else:
-                    st.warning("No split-coils found (coils processed both before and after the upgrade).")
-
-                # --- MATERIAL CONSISTENCY CHECK ---
-                st.markdown("---")
-                st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
-                st.info("Verifying that the 'Theoretical Values' remained constant across the machine upgrade timeline.")
-                
-                prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
-                if prop_cols:
-                    mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
-                    st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
+                if not split_pivot.empty:
+                    fig_s, ax_s = plt.subplots(figsize=(10, 5))
+                    split_pivot.plot(kind='bar', ax=ax_s, color=['#ff7f0e', '#1f77b4'], edgecolor='white')
+                    ax_s.set_ylabel("Scrap Rate (%)")
+                    ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
+                    add_chart_border(ax_s)
+                    plt.xticks(rotation=45, ha='right')
+                    st.pyplot(fig_s)
             else:
-                st.warning("Please map the 'Total Input Column' to begin the analysis.")
-                
+                st.warning("No split-coils found (coils processed both before and after the upgrade).")
+
+            # --- MATERIAL CONSISTENCY CHECK ---
+            st.markdown("---")
+            st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
+            st.info("Verifying that the Theoretical Values remained constant across the machine upgrade timeline.")
+            
+            prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+            if prop_cols:
+                mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
+                st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
         else:
-            st.warning(f"Required columns '{USAGE_COL}' or '{COIL_ID_COL}' not found in the dataset.")
+            st.warning(f"Required columns '{USAGE_COL}', '{COIL_ID_COL}', '{LEN_COL}', or '{SCRAP_COL}' not found in the dataset.")
 
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
