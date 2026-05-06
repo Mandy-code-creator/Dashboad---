@@ -114,6 +114,7 @@ if uploaded_file is not None:
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
+    # LƯU TRỮ DỮ LIỆU GỐC CHO BẢNG GRADE DISTRIBUTION (Chưa lọc độ dày)
     df_global_grades = df[df['Total_Qty'] > 0].copy()
 
     df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
@@ -369,13 +370,12 @@ if uploaded_file is not None:
         add_chart_border(ax)
 
     # --- TABS ---
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📁 1. Raw Data", 
         "📋 2. Quality Yield", 
         "📈 3. Capability (SPC)", 
         "📉 4. I-MR Tracking",
-        "✂️ 5. Tail Scrap",
-        "🎯 6. Customer End-Use"
+        "✂️ 5. Tail Scrap"
     ])
 
     # ==========================================================
@@ -483,6 +483,7 @@ if uploaded_file is not None:
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
         if not grade_dist_display.empty:
+            # Lọc bỏ dòng "2025 (Full Year)" an toàn bằng str.contains
             chart_grade_dist = grade_dist_display[~grade_dist_display.index.astype(str).str.contains("2025 \(Full Year\)", regex=True)]
             
             grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
@@ -508,6 +509,7 @@ if uploaded_file is not None:
             st.markdown("**Yield (%) by Period & Thickness**")
             fig_y, ax_y = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
+                # Lọc bỏ "2025 (Full Year)" an toàn
                 chart_df = yield_summary[~yield_summary['Time_Group'].astype(str).str.contains("2025 \(Full Year\)", regex=True)]
                 pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
@@ -930,117 +932,6 @@ if uploaded_file is not None:
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
-
-    # ==========================================================
-    # TASK 6: CUSTOMER END-USE ANALYSIS
-    # ==========================================================
-    with tab6:
-        st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer scrap rates based on Usage Month using Task 5 logic to validate the impact of the customer's machine upgrade.")
-        
-        USAGE_COL = '使用月份'
-        COIL_ID_COL = '鋼捲號碼'
-        
-        if USAGE_COL in df.columns and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df_t6 = df.copy()
-            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip().replace(['nan', 'None', ''], np.nan)
-            df_t6 = df_t6.dropna(subset=[USAGE_COL])
-            
-            df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
-            
-            # --- 1. MACRO VIEW ---
-            st.subheader("Macro View: Customer Scrap Rate by Usage Month")
-            
-            macro_df = df_t6.groupby(USAGE_COL).agg(
-                Total_Length=(LEN_COL, 'sum'),
-                Total_Scrap=(SCRAP_COL, 'sum')
-            ).reset_index()
-            
-            macro_df['Customer_Scrap_Rate (%)'] = np.where(
-                macro_df['Total_Length'] > 0, 
-                (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 
-                0
-            ).round(2)
-            
-            macro_df = macro_df.sort_values(USAGE_COL)
-            
-            if not macro_df.empty:
-                fig_m, ax_m = plt.subplots(figsize=(12, 5))
-                ax_m.plot(macro_df[USAGE_COL], macro_df['Customer_Scrap_Rate (%)'], marker='o', lw=2, color='#d62728')
-                
-                # Highlight Machine Upgrade in April (04)
-                april_mask = macro_df[USAGE_COL].str.contains('04|4')
-                if april_mask.any():
-                    april_idx = macro_df[april_mask].index[0]
-                    ax_m.axvline(x=april_idx, color='blue', linestyle='--', lw=2, label='Machine Upgraded (April)')
-                    
-                ax_m.set_ylabel("Customer Scrap Rate (%)")
-                ax_m.set_title("Scrap Rate Trend vs Machine Upgrade Timeline", fontweight='bold')
-                ax_m.legend()
-                add_chart_border(ax_m)
-                plt.xticks(rotation=45)
-                st.pyplot(fig_m)
-            
-            # --- 2. MICRO VIEW (SPLIT COIL) ---
-            st.markdown("---")
-            st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
-            st.info("Identifying specific coils used in both periods to prove the scrap variation is machine-dependent, not material-dependent.")
-            
-            def classify_period(m):
-                try:
-                    val = int(''.join(filter(str.isdigit, str(m))))
-                    if val >= 4:
-                        return 'After Upgrade (>= April)'
-                    else:
-                        return 'Before Upgrade (< April)'
-                except:
-                    if '04' in str(m) or '05' in str(m) or '06' in str(m):
-                         return 'After Upgrade (>= April)'
-                    return 'Before Upgrade (< April)'
-                    
-            df_t6['Machine_Status'] = df_t6[USAGE_COL].apply(classify_period)
-            
-            coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg(
-                Total_Length=(LEN_COL, 'sum'),
-                Total_Scrap=(SCRAP_COL, 'sum')
-            ).reset_index()
-            
-            coil_status_scrap['Scrap_Rate'] = np.where(
-                coil_status_scrap['Total_Length'] > 0, 
-                (coil_status_scrap['Total_Scrap'] / coil_status_scrap['Total_Length']) * 100, 
-                0
-            )
-            
-            coils_before = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'Before Upgrade (< April)'][COIL_ID_COL])
-            coils_after = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'After Upgrade (>= April)'][COIL_ID_COL])
-            split_coils = coils_before.intersection(coils_after)
-            
-            if split_coils:
-                split_df = coil_status_scrap[coil_status_scrap[COIL_ID_COL].isin(split_coils)]
-                split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate', aggfunc='mean')
-                
-                if not split_pivot.empty:
-                    fig_s, ax_s = plt.subplots(figsize=(10, 5))
-                    split_pivot.plot(kind='bar', ax=ax_s, color=['#ff7f0e', '#1f77b4'], edgecolor='white')
-                    ax_s.set_ylabel("Scrap Rate (%)")
-                    ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
-                    add_chart_border(ax_s)
-                    plt.xticks(rotation=45, ha='right')
-                    st.pyplot(fig_s)
-            else:
-                st.warning("No split-coils found (coils processed both before and after the upgrade).")
-
-            # --- MATERIAL CONSISTENCY CHECK ---
-            st.markdown("---")
-            st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
-            st.info("Verifying that the Theoretical Values remained constant across the machine upgrade timeline.")
-            
-            prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
-            if prop_cols:
-                mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
-                st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
-        else:
-            st.warning(f"Required columns '{USAGE_COL}', '{COIL_ID_COL}', '{LEN_COL}', or '{SCRAP_COL}' not found in the dataset.")
 
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
