@@ -213,48 +213,6 @@ if uploaded_file is not None:
         if cpk >= 1.00: return '⚠️ Marginal'
         return '❌ Not Capable'
 
-    def render_capability_badge(cap, feat, period_label, thickness):
-        if cap is None: return
-        
-        mu_v   = f"{cap['mean']:.2f}"
-        std_v  = f"{cap['std']:.3f}"
-        
-        if thickness == 'Overall':
-            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
-            clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
-            lsl_v, usl_v = '—', '—'
-        elif is_valid_for_control(period_label):
-            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
-            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
-            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
-            clr    = cpk_color(cap['Cpk'])
-            lbl    = cpk_label(cap['Cpk'], period_label, thickness)
-            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
-            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
-        else:
-            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
-            clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
-            lsl_v, usl_v = '—', '—'
-
-        html_badge = f"""
-        <div style="background:#f8f9fa;border-left:5px solid {clr};
-                    border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
-                    font-family:monospace;font-size:13px;line-height:1.8;">
-          <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
-          &nbsp;&nbsp;|&nbsp;&nbsp;
-          <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
-          &nbsp;&nbsp;|&nbsp;&nbsp;
-          <b>n</b>: {cap['n']} &nbsp;
-          <b>Mean</b>: {mu_v} &nbsp;
-          <b>Std</b>: {std_v}
-          <br>
-          <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
-          <b>Cp = {cp_v}</b> &nbsp;&nbsp;
-          <b>Ca = {ca_v}</b>
-        </div>
-        """
-        st.markdown(html_badge, unsafe_allow_html=True)
-
     def build_capability_summary(df_src, feat, label, thick):
         vals = df_src[feat].dropna().values if feat in df_src.columns else []
         cap = calc_capability(vals, feat, label, thick)
@@ -475,8 +433,11 @@ if uploaded_file is not None:
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
         if not grade_dist_display.empty:
+            # LỌC "2025 (Full Year)" KHỎI BIỂU ĐỒ NÀY
+            chart_grade_dist = grade_dist_display[grade_dist_display.index != "2025 (Full Year)"]
+            
             grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
-            grade_dist_display.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
+            chart_grade_dist.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
             ax_g.set_ylabel("Percentage (%)")
             ax_g.set_xlabel("")
             ax_g.set_ylim(0, 105)
@@ -503,11 +464,10 @@ if uploaded_file is not None:
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    # VERTICAL LABELS TO PREVENT OVERLAP
                     for c in ax_y.containers:
                         labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                         ax_y.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
-            ax_y.set_ylim(0, 130) # Extended top margin
+            ax_y.set_ylim(0, 130) 
             ax_y.set_ylabel("Yield (%)")
             ax_y.set_xlabel("")
             add_chart_border(ax_y)
@@ -524,7 +484,6 @@ if uploaded_file is not None:
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    # VERTICAL LABELS
                     for c in ax_d.containers:
                         labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                         ax_d.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
@@ -602,14 +561,14 @@ if uploaded_file is not None:
             cols = st.columns(2)
             for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
                 with cols[idx % 2]:
+                    # ONLY ONE BADGE, Rendered above the chart
+                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
+                    vals_all = df_p_valid[f].dropna().values
+                    
                     fig, ax = plt.subplots(figsize=(8, 4.5))
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
-                    
-                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
-                    vals_all = df_p_valid[f].dropna().values
-                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -625,10 +584,6 @@ if uploaded_file is not None:
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
-                        
-                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
-                        vals_t = df_t_valid[f].dropna().values
-                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
             st.markdown("---")
 
     # ==========================================================
@@ -666,6 +621,8 @@ if uploaded_file is not None:
                 
                 vals_all = plot_df[t4_feat].values
                 cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
+                
+                # RENDER BADGE HERE INSTEAD OF INSIDE THE CHART
                 render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
                 
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
@@ -740,7 +697,6 @@ if uploaded_file is not None:
                 ax_mr.set_xticks(range(0, len(vals), step))
                 ax_mr.set_xticklabels(dates.iloc[::step], rotation=45, ha='right')
                 
-                # Allow Matplotlib to naturally adjust for the external legends
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
 
@@ -881,7 +837,6 @@ if uploaded_file is not None:
                     if not pivot_t.empty:
                         pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-                        # VERTICAL LABELS
                         for c in ax_t.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                             ax_t.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
@@ -902,7 +857,6 @@ if uploaded_file is not None:
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
-                        # VERTICAL LABELS
                         for c in ax_m.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                             ax_m.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
