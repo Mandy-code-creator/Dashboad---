@@ -49,7 +49,6 @@ if uploaded_file is not None:
     if 'Actual_Thickness' in df.columns:
         df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
         
-        # EXACT MAPPING LOGIC FOR ORDER THICKNESS
         def map_thickness(val):
             if pd.isna(val): return None
             v = round(float(val), 2)
@@ -108,7 +107,6 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
-    # STRICT FILTER FOR LIMIT CALCULATIONS: Only quality levels A or B (A-B+, A-B)
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
@@ -142,6 +140,227 @@ if uploaded_file is not None:
             spine.set_visible(True)
             spine.set_color('#333333')
             spine.set_linewidth(1.0)
+
+    # --- SPC & CAPABILITY HELPER FUNCTIONS ---
+    def is_valid_for_control(period_label):
+        if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
+            return False
+        return True
+
+    def calc_capability(values, feat, period_label, thickness):
+        vals = np.array(values, dtype=float)
+        vals = vals[~np.isnan(vals)]
+        
+        if thickness == 'Overall':
+            return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
+                    'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
+
+        if len(vals) < 2: return None
+        mu  = np.mean(vals)
+        std = np.std(vals, ddof=1)
+        if std == 0: return None
+
+        spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
+        lsl  = spec.get('min')
+        usl  = spec.get('max')
+        tgt  = spec.get('target')
+
+        result = {'mean': mu, 'std': std, 'n': len(vals),
+                  'Cp': None, 'Cpk': None, 'Ca': None,
+                  'LSL': lsl, 'USL': usl, 'Target': tgt}
+
+        if not is_valid_for_control(period_label):
+            return result
+
+        if lsl is not None and usl is not None:
+            cp   = (usl - lsl) / (6 * std)
+            cpu  = (usl - mu)  / (3 * std)
+            cpl  = (mu  - lsl) / (3 * std)
+            cpk  = min(cpu, cpl)
+            result['Cp']  = round(cp,  3)
+            result['Cpk'] = round(cpk, 3)
+            if tgt is not None:
+                ca = (mu - tgt) / ((usl - lsl) / 2) * 100
+                result['Ca'] = round(ca, 2)
+            else:
+                mid = (usl + lsl) / 2
+                ca  = (mu - mid) / ((usl - lsl) / 2) * 100
+                result['Ca'] = round(ca, 2)
+        elif lsl is not None:
+            cpl = (mu - lsl) / (3 * std)
+            result['Cp']  = round(cpl, 3)
+            result['Cpk'] = round(cpl, 3)
+        elif usl is not None:
+            cpu = (usl - mu) / (3 * std)
+            result['Cp']  = round(cpu, 3)
+            result['Cpk'] = round(cpu, 3)
+
+        return result
+
+    def cpk_color(cpk):
+        if cpk is None: return '#888888'
+        if cpk >= 1.67: return '#2e7d32'   
+        if cpk >= 1.33: return '#66bb6a'   
+        if cpk >= 1.00: return '#ffa726'   
+        return '#d62728'                   
+
+    def cpk_label(cpk, period_label, thickness):
+        if thickness == 'Overall': return 'Mixed Specs'
+        if not is_valid_for_control(period_label): return 'Not Monitored'
+        if cpk is None: return 'N/A'
+        if cpk >= 1.67: return '✅ Excellent'
+        if cpk >= 1.33: return '✅ Capable'
+        if cpk >= 1.00: return '⚠️ Marginal'
+        return '❌ Not Capable'
+
+    def render_capability_badge(cap, feat, period_label, thickness):
+        if cap is None: return
+        
+        mu_v   = f"{cap['mean']:.2f}"
+        std_v  = f"{cap['std']:.3f}"
+        
+        if thickness == 'Overall':
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
+            lsl_v, usl_v = '—', '—'
+        elif is_valid_for_control(period_label):
+            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
+            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
+            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+            clr    = cpk_color(cap['Cpk'])
+            lbl    = cpk_label(cap['Cpk'], period_label, thickness)
+            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
+            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+        else:
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
+            lsl_v, usl_v = '—', '—'
+
+        html_badge = f"""
+        <div style="background:#f8f9fa;border-left:5px solid {clr};
+                    border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
+                    font-family:monospace;font-size:13px;line-height:1.8;">
+          <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>n</b>: {cap['n']} &nbsp;
+          <b>Mean</b>: {mu_v} &nbsp;
+          <b>Std</b>: {std_v}
+          <br>
+          <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
+          <b>Cp = {cp_v}</b> &nbsp;&nbsp;
+          <b>Ca = {ca_v}</b>
+        </div>
+        """
+        st.markdown(html_badge, unsafe_allow_html=True)
+
+    def build_capability_summary(df_src, feat, label, thick):
+        vals = df_src[feat].dropna().values if feat in df_src.columns else []
+        cap = calc_capability(vals, feat, label, thick)
+        if cap is None or cap['n'] < 2: return None
+        
+        if not is_valid_for_control(label):
+            return {
+                'Period': label, 'Thickness': thick, 'Feature': feat, 'n': cap['n'],
+                'Mean': round(cap['mean'], 2), 'Std': round(cap['std'], 3),
+                'LSL': None, 'USL': None, 'Ca (%)': None, 'Cp': None, 'Cpk': None,
+                'Verdict': 'Not Monitored'
+            }
+
+        return {
+            'Period': label, 'Thickness': thick, 'Feature': feat, 'n': cap['n'],
+            'Mean': round(cap['mean'], 2), 'Std': round(cap['std'], 3),
+            'LSL': cap['LSL'], 'USL': cap['USL'], 'Ca (%)': cap['Ca'],
+            'Cp': cap['Cp'], 'Cpk': cap['Cpk'],
+            'Verdict': cpk_label(cap['Cpk'], label, thick).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
+        }
+
+    global_x_bounds = {}
+    for feat in ['YS', 'TS', 'EL', 'YPE']:
+        if feat in df.columns:
+            vd = df[[feat, 'Valid_Qty']].dropna().copy()
+            vd = vd[vd['Valid_Qty'] > 0]
+            if not vd.empty:
+                q1, q99 = np.percentile(vd[feat], 1), np.percentile(vd[feat], 99)
+                global_x_bounds[feat] = (q1 - (q99 - q1) * 0.25, q99 + (q99 - q1) * 0.25)
+
+    def get_shared_y(data, features):
+        max_y = 0
+        for f in features:
+            if f in data.columns:
+                vd = data.dropna(subset=[f])
+                if not vd.empty:
+                    cnts, _ = np.histogram(vd[f], bins=15, weights=vd['Total_Qty'])
+                    max_y = max(max_y, cnts.max())
+        return max_y * 1.35 if max_y > 0 else 50
+
+    def plot_dist(ax, data, feat, title, y_lim, period_label, thickness):
+        c_map = {'A-B+': '#2ca02c', 'A-B': '#1f77b4', 'A-B-': '#ff7f0e', 'B+': '#9467bd', 'B': '#d62728'}
+        fmin, fmax = global_x_bounds.get(feat, (data[feat].min() if not data.empty else 0, data[feat].max() if not data.empty else 100))
+        if fmin == fmax: fmax += 1
+        
+        v_l, w_l, clrs, m_info = [], [], [], []
+        for g in base_grades:
+            if g in data.columns:
+                td = data[[feat, g]].dropna()
+                td = td[td[g] > 0]
+                if not td.empty:
+                    v_l.append(td[feat].values)
+                    w_l.append(td[g].values)
+                    clrs.append(c_map[g])
+                    m = np.average(td[feat].values, weights=td[g].values)
+                    ax.axvline(m, color=c_map[g], ls='--', lw=1.2)
+                    m_info.append({'v': m, 'c': c_map[g], 'label': g})
+
+        if v_l:
+            ax.hist(v_l, bins=np.linspace(fmin, fmax, 16), weights=w_l, color=clrs, stacked=True, edgecolor='white', alpha=0.7)
+            m_info.sort(key=lambda x: x['v'])
+            x_range = fmax - fmin
+            min_gap = x_range * 0.045
+            positions = [info['v'] for info in m_info]
+            for _ in range(50):
+                moved = False
+                for i in range(1, len(positions)):
+                    if positions[i] - positions[i - 1] < min_gap:
+                        mid = (positions[i] + positions[i - 1]) / 2
+                        positions[i - 1] = mid - min_gap / 2
+                        positions[i] = mid + min_gap / 2
+                        moved = True
+                if not moved: break
+            
+            y_levels = [y_lim * (0.92 - (i % 4) * 0.13) for i in range(len(m_info))]
+            for i, info in enumerate(m_info):
+                x_pos = positions[i]
+                y_pos = y_levels[i]
+                ax.annotate(
+                    f"{info['v']:.1f}",
+                    xy=(info['v'], y_pos * 0.6), xytext=(x_pos, y_pos),
+                    color='white', fontweight='bold', fontsize=8, ha='center', va='center',
+                    bbox=dict(facecolor=info['c'], alpha=0.85, boxstyle='round,pad=0.25'),
+                    arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
+                )
+
+        if thickness != 'Overall' and is_valid_for_control(period_label):
+            spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
+            lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
+            y_top = y_lim * 0.98
+            if lsl is not None:
+                ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
+                ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
+            if usl is not None:
+                ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
+                ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
+            if tgt is not None:
+                ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
+                ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
+
+        ax.legend(handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
+                  loc='upper right', fontsize=7)
+        ax.set_xlim(fmin, fmax)
+        ax.set_ylim(0, y_lim)
+        ax.set_title(title, fontsize=10, fontweight='bold')
+        add_chart_border(ax)
 
     # --- TABS ---
     tab0, tab1, tab3, tab4, tab5 = st.tabs([
@@ -323,236 +542,6 @@ if uploaded_file is not None:
         st.header("📊 Distribution & Process Capability (SPC)")
         st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards. Limit calculations strictly based on grades A or B (A-B+, A-B).")
 
-        def is_valid_for_control(period_label):
-            if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
-                return False
-            return True
-
-        def calc_capability(values, feat, period_label, thickness):
-            vals = np.array(values, dtype=float)
-            vals = vals[~np.isnan(vals)]
-            
-            if thickness == 'Overall':
-                return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
-                        'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
-
-            if len(vals) < 2: return None
-            mu  = np.mean(vals)
-            std = np.std(vals, ddof=1)
-            if std == 0: return None
-
-            spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
-            lsl  = spec.get('min')
-            usl  = spec.get('max')
-            tgt  = spec.get('target')
-
-            result = {'mean': mu, 'std': std, 'n': len(vals),
-                      'Cp': None, 'Cpk': None, 'Ca': None,
-                      'LSL': lsl, 'USL': usl, 'Target': tgt}
-
-            if not is_valid_for_control(period_label):
-                return result
-
-            if lsl is not None and usl is not None:
-                cp   = (usl - lsl) / (6 * std)
-                cpu  = (usl - mu)  / (3 * std)
-                cpl  = (mu  - lsl) / (3 * std)
-                cpk  = min(cpu, cpl)
-                result['Cp']  = round(cp,  3)
-                result['Cpk'] = round(cpk, 3)
-                if tgt is not None:
-                    ca = (mu - tgt) / ((usl - lsl) / 2) * 100
-                    result['Ca'] = round(ca, 2)
-                else:
-                    mid = (usl + lsl) / 2
-                    ca  = (mu - mid) / ((usl - lsl) / 2) * 100
-                    result['Ca'] = round(ca, 2)
-            elif lsl is not None:
-                cpl = (mu - lsl) / (3 * std)
-                result['Cp']  = round(cpl, 3)
-                result['Cpk'] = round(cpl, 3)
-            elif usl is not None:
-                cpu = (usl - mu) / (3 * std)
-                result['Cp']  = round(cpu, 3)
-                result['Cpk'] = round(cpu, 3)
-
-            return result
-
-        def cpk_color(cpk):
-            if cpk is None: return '#888888'
-            if cpk >= 1.67: return '#2e7d32'   
-            if cpk >= 1.33: return '#66bb6a'   
-            if cpk >= 1.00: return '#ffa726'   
-            return '#d62728'                   
-
-        def cpk_label(cpk, period_label, thickness):
-            if thickness == 'Overall': return 'Mixed Specs'
-            if not is_valid_for_control(period_label): return 'Not Monitored'
-            if cpk is None: return 'N/A'
-            if cpk >= 1.67: return '✅ Excellent'
-            if cpk >= 1.33: return '✅ Capable'
-            if cpk >= 1.00: return '⚠️ Marginal'
-            return '❌ Not Capable'
-
-        def render_capability_badge(cap, feat, period_label, thickness):
-            if cap is None: return
-            
-            mu_v   = f"{cap['mean']:.2f}"
-            std_v  = f"{cap['std']:.3f}"
-            
-            if thickness == 'Overall':
-                cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
-                clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
-                lsl_v, usl_v = '—', '—'
-            elif is_valid_for_control(period_label):
-                cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
-                cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
-                ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
-                clr    = cpk_color(cap['Cpk'])
-                lbl    = cpk_label(cap['Cpk'], period_label, thickness)
-                lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
-                usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
-            else:
-                cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
-                clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
-                lsl_v, usl_v = '—', '—'
-
-            html_badge = f"""
-            <div style="background:#f8f9fa;border-left:5px solid {clr};
-                        border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
-                        font-family:monospace;font-size:13px;line-height:1.8;">
-              <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
-              &nbsp;&nbsp;|&nbsp;&nbsp;
-              <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
-              &nbsp;&nbsp;|&nbsp;&nbsp;
-              <b>n</b>: {cap['n']} &nbsp;
-              <b>Mean</b>: {mu_v} &nbsp;
-              <b>Std</b>: {std_v}
-              <br>
-              <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
-              <b>Cp = {cp_v}</b> &nbsp;&nbsp;
-              <b>Ca = {ca_v}</b>
-            </div>
-            """
-            st.markdown(html_badge, unsafe_allow_html=True)
-
-        def build_capability_summary(df_src, feat, label, thick):
-            vals = df_src[feat].dropna().values if feat in df_src.columns else []
-            cap = calc_capability(vals, feat, label, thick)
-            if cap is None or cap['n'] < 2: return None
-            
-            if not is_valid_for_control(label):
-                return {
-                    'Period': label, 'Thickness': thick, 'Feature': feat, 'n': cap['n'],
-                    'Mean': round(cap['mean'], 2), 'Std': round(cap['std'], 3),
-                    'LSL': None, 'USL': None, 'Ca (%)': None, 'Cp': None, 'Cpk': None,
-                    'Verdict': 'Not Monitored'
-                }
-
-            return {
-                'Period': label,
-                'Thickness': thick,
-                'Feature': feat,
-                'n': cap['n'],
-                'Mean': round(cap['mean'], 2),
-                'Std': round(cap['std'], 3),
-                'LSL': cap['LSL'],
-                'USL': cap['USL'],
-                'Ca (%)': cap['Ca'],
-                'Cp': cap['Cp'],
-                'Cpk': cap['Cpk'],
-                'Verdict': cpk_label(cap['Cpk'], label, thick).replace('✅ ', '').replace('⚠️ ', '').replace('❌ ', '')
-            }
-
-        global_x_bounds = {}
-        for feat in ['YS', 'TS', 'EL', 'YPE']:
-            if feat in df.columns:
-                # Use Valid_Qty for Limit Calculations
-                vd = df[[feat, 'Valid_Qty']].dropna().copy()
-                vd = vd[vd['Valid_Qty'] > 0]
-                if not vd.empty:
-                    q1, q99 = np.percentile(vd[feat], 1), np.percentile(vd[feat], 99)
-                    global_x_bounds[feat] = (q1 - (q99 - q1) * 0.25, q99 + (q99 - q1) * 0.25)
-
-        def get_shared_y(data, features):
-            max_y = 0
-            for f in features:
-                if f in data.columns:
-                    vd = data.dropna(subset=[f])
-                    if not vd.empty:
-                        cnts, _ = np.histogram(vd[f], bins=15, weights=vd['Total_Qty'])
-                        max_y = max(max_y, cnts.max())
-            return max_y * 1.35 if max_y > 0 else 50
-
-        def plot_dist(ax, data, feat, title, y_lim, period_label, thickness):
-            c_map = {'A-B+': '#2ca02c', 'A-B': '#1f77b4', 'A-B-': '#ff7f0e', 'B+': '#9467bd', 'B': '#d62728'}
-            
-            fmin, fmax = global_x_bounds.get(feat, (data[feat].min() if not data.empty else 0, data[feat].max() if not data.empty else 100))
-            if fmin == fmax: fmax += 1
-            
-            v_l, w_l, clrs, m_info = [], [], [], []
-            for g in base_grades:
-                if g in data.columns:
-                    td = data[[feat, g]].dropna()
-                    td = td[td[g] > 0]
-                    if not td.empty:
-                        v_l.append(td[feat].values)
-                        w_l.append(td[g].values)
-                        clrs.append(c_map[g])
-                        m = np.average(td[feat].values, weights=td[g].values)
-                        ax.axvline(m, color=c_map[g], ls='--', lw=1.2)
-                        m_info.append({'v': m, 'c': c_map[g], 'label': g})
-
-            if v_l:
-                ax.hist(v_l, bins=np.linspace(fmin, fmax, 16), weights=w_l, color=clrs, stacked=True, edgecolor='white', alpha=0.7)
-                
-                m_info.sort(key=lambda x: x['v'])
-                x_range = fmax - fmin
-                min_gap = x_range * 0.045
-                positions = [info['v'] for info in m_info]
-                for _ in range(50):
-                    moved = False
-                    for i in range(1, len(positions)):
-                        if positions[i] - positions[i - 1] < min_gap:
-                            mid = (positions[i] + positions[i - 1]) / 2
-                            positions[i - 1] = mid - min_gap / 2
-                            positions[i] = mid + min_gap / 2
-                            moved = True
-                    if not moved: break
-                
-                y_levels = [y_lim * (0.92 - (i % 4) * 0.13) for i in range(len(m_info))]
-                for i, info in enumerate(m_info):
-                    x_pos = positions[i]
-                    y_pos = y_levels[i]
-                    ax.annotate(
-                        f"{info['v']:.1f}",
-                        xy=(info['v'], y_pos * 0.6), xytext=(x_pos, y_pos),
-                        color='white', fontweight='bold', fontsize=8, ha='center', va='center',
-                        bbox=dict(facecolor=info['c'], alpha=0.85, boxstyle='round,pad=0.25'),
-                        arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
-                    )
-
-            if thickness != 'Overall' and is_valid_for_control(period_label):
-                spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
-                lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
-                y_top = y_lim * 0.98
-                if lsl is not None:
-                    ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
-                    ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
-                if usl is not None:
-                    ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
-                    ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
-                if tgt is not None:
-                    ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
-                    ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
-
-            ax.legend(handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
-                      loc='upper right', fontsize=7)
-            ax.set_xlim(fmin, fmax)
-            ax.set_ylim(0, y_lim)
-            ax.set_title(title, fontsize=10, fontweight='bold')
-            add_chart_border(ax)
-
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
         thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
         
@@ -560,7 +549,6 @@ if uploaded_file is not None:
         for _p in ordered_periods:
             if _p == "2025 (Full Year)": continue 
             _dfp = df[df['Time_Group'] == _p]
-            # Use Valid_Qty for Capability Log Table
             _dfp_valid = _dfp[_dfp['Valid_Qty'] > 0]
             
             for _t in thickness_list:
@@ -646,7 +634,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab4:
         st.header("📉 Post-Control Tracking (I-MR Charts)")
-        st.info("Tracking process stability for production from 2026 onwards. Limits calculated ONLY based on grades A or B (A-B+, A-B).")
+        st.info("Tracking process stability for production from 2026 onwards. Limits and charts calculated ONLY based on grades A or B (A-B+, A-B).")
         
         df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
@@ -654,22 +642,31 @@ if uploaded_file is not None:
         if df_t4.empty:
             st.warning("No valid data available for 2026 onwards.")
         else:
-            c1, c2 = st.columns(2)
-            t4_feat = c1.selectbox("Select Mechanical Feature:", ['YS', 'TS', 'EL', 'YPE'])
-            
             thicknesses = ['Overall'] + sorted(df_t4['Actual_Thickness'].dropna().unique().tolist())
-            t4_thick = c2.selectbox("Select Thickness:", thicknesses)
+            t4_thick = st.selectbox("Select Thickness Category:", thicknesses)
             
             if t4_thick != 'Overall':
-                plot_df = df_t4[df_t4['Actual_Thickness'] == t4_thick]
+                plot_df_base = df_t4[df_t4['Actual_Thickness'] == t4_thick]
             else:
-                plot_df = df_t4
+                plot_df_base = df_t4
                 
-            plot_df = plot_df.sort_values('Production_Date').dropna(subset=[t4_feat])
-            
-            if len(plot_df) < 2:
-                st.warning("Not enough data points to plot I-MR chart for this selection.")
-            else:
+            for t4_feat in ['YS', 'TS', 'EL', 'YPE']:
+                if t4_feat not in plot_df_base.columns:
+                    continue
+                    
+                plot_df = plot_df_base.sort_values('Production_Date').dropna(subset=[t4_feat])
+                
+                if len(plot_df) < 2:
+                    continue
+                    
+                st.markdown("---")
+                st.subheader(f"Feature: {t4_feat}")
+                
+                # Render the Cpk/Cp/Ca Badge directly above the chart (Valid because 2026 Onwards is within control period)
+                vals_all = plot_df[t4_feat].values
+                cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick) # Using a valid post-Q4 label
+                render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
+                
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
                 vals = plot_df[t4_feat].values
                 
@@ -911,8 +908,8 @@ if uploaded_file is not None:
             grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'cap_summary_rows' in locals() and cap_summary_rows:
                 pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
-            if 'plot_df' in locals() and not plot_df.empty:
-                plot_df.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
+            if 'plot_df_base' in locals() and not plot_df_base.empty:
+                plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
             if 'trend_data' in locals() and not trend_data.empty:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
