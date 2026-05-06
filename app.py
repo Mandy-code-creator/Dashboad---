@@ -305,7 +305,7 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
     # ==========================================================
-    # TASK 4: I-MR TRACKING (SỬA TRỤC X THEO THÁNG)
+    # TASK 4: I-MR TRACKING
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
@@ -330,8 +330,6 @@ if uploaded_file is not None:
                 st.markdown(f"### 🎯 Feature: {t4_feat}")
                 
                 vals = plot_df[t4_feat].values
-                
-                # 🚀 HIỂN THỊ NĂM-THÁNG TRÊN TRỤC X (YYYY-MM)
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m')
                 
                 cap_data = calc_capability(vals, t4_feat, 'Q4 2025 Onwards', t4_thick)
@@ -342,6 +340,7 @@ if uploaded_file is not None:
                 
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 9), gridspec_kw={'height_ratios': [2, 1]})
                 
+                # --- I-Chart ---
                 ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.6, label='Actual Data')
                 
                 bbox_props = dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none")
@@ -382,7 +381,7 @@ if uploaded_file is not None:
                 ax1.set_xticklabels(dates.iloc[::step], rotation=45, ha='right', fontsize=9)
                 add_chart_border(ax1)
                 
-                # MR-Chart
+                # --- MR-Chart ---
                 ax2.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', alpha=0.6)
                 ax2.axhline(mr_mean, color='green', ls='--')
                 ax2.text(len(mr), mr_mean, f' Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
@@ -390,6 +389,12 @@ if uploaded_file is not None:
                 ucl_mr = 3.267 * mr_mean
                 ax2.axhline(ucl_mr, color='red', ls='--')
                 ax2.text(len(mr), ucl_mr, f' UCL MR: {ucl_mr:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
+                
+                # 🚀 SỬA LỖI: TÔ ĐỎ ĐIỂM VI PHẠM CHO BIỂU ĐỒ MR
+                out_mr = np.where(mr > ucl_mr)[0]
+                if len(out_mr) > 0:
+                    # Trục x của biểu đồ MR bắt đầu từ 1, nên tọa độ điểm lỗi là out_mr + 1
+                    ax2.scatter(out_mr + 1, mr[out_mr], color='red', s=90, zorder=5, label='Out of Control (MR)')
                 
                 ax2.set_title("Moving Range (MR) Chart", fontsize=10, fontweight='bold')
                 ax2.set_xlim(-1, x_max + 1)
