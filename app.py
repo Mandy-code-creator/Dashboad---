@@ -305,7 +305,7 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
     # ==========================================================
-    # TASK 4: I-MR TRACKING 
+    # TASK 4: I-MR TRACKING
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
@@ -419,7 +419,6 @@ if uploaded_file is not None:
             first_occ = df_t5.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             df_m = first_occ[['Time_Group', COIL_ID_COL, LEN_COL, 'Actual_Thickness', 'HR_Material']].merge(scrap_totals, on=[COIL_ID_COL, 'Time_Group'])
 
-            # --- 1. HYBRID TREND LINE ---
             st.subheader("Rejection Rate Trend (%)")
             trend_data = df_m.groupby('Time_Group').agg(Input_Length=(LEN_COL, 'sum'), Total_Scrap=(SCRAP_COL, 'sum')).reset_index()
             trend_data = trend_data[trend_data['Time_Group'] != 'Unknown']
@@ -444,7 +443,6 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
             st.pyplot(fig_trend)
 
-            # --- 2. PERIOD SUMMARY CHART ---
             st.markdown("---")
             st.subheader("Scrap Rate by Time Period")
             scrap_p = df_m.groupby('Time_Group').agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
@@ -467,7 +465,6 @@ if uploaded_file is not None:
             
             st.dataframe(scrap_p.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds').format({LEN_COL: '{:,.2f}', SCRAP_COL: '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
-            # --- 3. LEVEL-BY-LEVEL DRILL DOWN ---
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             scrap_detail = df_m.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
@@ -512,7 +509,7 @@ if uploaded_file is not None:
             st.dataframe(scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges').format({'Actual_Thickness': '{:.2f}', LEN_COL: '{:,.2f}', SCRAP_COL: '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
     # ==========================================================
-    # TASK 6: CUSTOMER END-USE ANALYSIS (CÓ BIỂU ĐỒ ĐỐI CHỨNG)
+    # TASK 6: CUSTOMER END-USE ANALYSIS
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
@@ -539,49 +536,52 @@ if uploaded_file is not None:
             df_t6['Display_Month'] = df_t6['Parsed_Date'].dt.strftime('%Y-%m')
             df_t6['Machine_Status'] = df_t6['Parsed_Date'].apply(lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)')
 
-            # 🚀 THÊM BIỂU ĐỒ ĐỐI CHỨNG KÉP (EXECUTIVE PROOF)
             st.subheader("Executive Proof: Customer Scrap Rate vs. Internal Material Quality")
             
-            # Tính cả phế liệu lẫn Cơ tính trung bình theo tháng
             macro_df = df_t6.groupby('Display_Month').agg(
                 Total_Length=(LEN_COL, 'sum'), 
                 Total_Scrap=(SCRAP_COL, 'sum'),
-                Avg_YS=('YS', 'mean') # Lấy YS làm mốc đo lường sự ổn định vật liệu
+                Avg_YS=('YS', 'mean'),
+                Avg_TS=('TS', 'mean'),
+                Avg_EL=('EL', 'mean')
             ).reset_index()
             macro_df = macro_df.sort_values('Display_Month')
             macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
             
             if not macro_df.empty:
-                fig_exec, ax1 = plt.subplots(figsize=(14, 5))
+                st.markdown("**Correlation between Scrap Rate and Theoretical Values (YS, TS, EL)**")
+                cols = st.columns(3)
                 
-                # Trục trái: Phế liệu Khách hàng
-                color1 = '#d62728' 
-                ax1.set_ylabel('Customer Scrap Rate (%)', color=color1, fontweight='bold', fontsize=11)
-                ax1.plot(macro_df['Display_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=3, label='Scrap Rate')
-                ax1.tick_params(axis='y', labelcolor=color1)
-                ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.5 + 1)
-                ax1.grid(axis='x', visible=False)
+                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
+                            ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
+                            ('Avg_EL', 'Theoretical EL', '#9467bd')]
                 
-                # Trục phải: Cơ tính nhà máy (YS)
-                ax2 = ax1.twinx()
-                color2 = '#1f77b4' 
-                ax2.set_ylabel('Internal Material Stability (Avg YS)', color=color2, fontweight='bold', fontsize=11)
-                # Dùng np.nanmean để tránh lỗi nếu cột YS có giá trị null
-                ys_valid = macro_df['Avg_YS'].dropna()
-                if not ys_valid.empty:
-                    ax2.plot(macro_df['Display_Month'], macro_df['Avg_YS'], color=color2, marker='s', linestyle='--', linewidth=2.5, alpha=0.8, label='Theoretical YS')
-                    ax2.tick_params(axis='y', labelcolor=color2)
-                    ys_mean = ys_valid.mean()
-                    ax2.set_ylim(ys_mean * 0.85, ys_mean * 1.15) # Zoom gọn lại để thấy rõ đường thẳng tắp
+                for idx, (col_name, label, color) in enumerate(features):
+                    with cols[idx]:
+                        fig_exec, ax1 = plt.subplots(figsize=(6, 4))
+                        
+                        color1 = '#d62728' 
+                        ax1.set_ylabel('Scrap Rate (%)', color=color1, fontweight='bold', fontsize=9)
+                        ax1.plot(macro_df['Display_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
+                        ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
+                        ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.5 + 1)
+                        
+                        ax2 = ax1.twinx()
+                        feat_valid = macro_df[col_name].dropna()
+                        if not feat_valid.empty:
+                            ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
+                            ax2.plot(macro_df['Display_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
+                            ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
+                            feat_mean = feat_valid.mean()
+                            ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
+                        
+                        plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
+                        ax1.set_xticklabels(macro_df['Display_Month'], rotation=45, ha='right', fontsize=8)
+                        add_chart_border(ax1)
+                        fig_exec.tight_layout()
+                        st.pyplot(fig_exec)
                 
-                plt.title("Scrap Rate Spikes While Material Quality Remains Completely Stable", fontweight='bold', fontsize=14, color='#333333')
-                ax1.set_xticklabels(macro_df['Display_Month'], rotation=45, ha='right')
-                
-                # Ghi chú kết luận
-                fig_exec.text(0.5, -0.15, "Conclusion: The spike in scrap is not caused by the material (Blue line is stable), proving the customer's machine was at fault.", ha='center', fontsize=12, fontweight='bold', color='#c00000')
-                
-                fig_exec.tight_layout()
-                st.pyplot(fig_exec)
+                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Diagnosis")
