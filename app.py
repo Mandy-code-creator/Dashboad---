@@ -503,10 +503,11 @@ if uploaded_file is not None:
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
                     ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    # VERTICAL LABELS TO PREVENT OVERLAP
                     for c in ax_y.containers:
                         labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                        ax_y.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
-            ax_y.set_ylim(0, 125) 
+                        ax_y.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
+            ax_y.set_ylim(0, 130) # Extended top margin
             ax_y.set_ylabel("Yield (%)")
             ax_y.set_xlabel("")
             add_chart_border(ax_y)
@@ -523,11 +524,12 @@ if uploaded_file is not None:
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
                     ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    # VERTICAL LABELS
                     for c in ax_d.containers:
                         labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                        ax_d.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                        ax_d.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
                     y_max = pivot_d.max().max() if not pivot_d.isna().all().all() else 10
-                    ax_d.set_ylim(0, y_max * 1.3 + 2)
+                    ax_d.set_ylim(0, y_max * 1.4 + 2)
             ax_d.set_ylabel("Defect Rate (%)")
             ax_d.set_xlabel("")
             add_chart_border(ax_d)
@@ -879,11 +881,12 @@ if uploaded_file is not None:
                     if not pivot_t.empty:
                         pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        # VERTICAL LABELS
                         for c in ax_t.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                            ax_t.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                            ax_t.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
                     y_max = pivot_t.max().max() if not pivot_t.isna().all().all() else 10
-                    ax_t.set_ylim(0, y_max * 1.3 + 2)
+                    ax_t.set_ylim(0, y_max * 1.4 + 2)
                 ax_t.set_ylabel("Scrap Rate (%)")
                 ax_t.set_xlabel("")
                 add_chart_border(ax_t)
@@ -899,11 +902,12 @@ if uploaded_file is not None:
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        # VERTICAL LABELS
                         for c in ax_m.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                            ax_m.bar_label(c, labels=labels, padding=3, fontsize=8, fontweight='bold')
+                            ax_m.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
                     y_max = pivot_m.max().max() if not pivot_m.isna().all().all() else 10
-                    ax_m.set_ylim(0, y_max * 1.3 + 2)
+                    ax_m.set_ylim(0, y_max * 1.4 + 2)
                 ax_m.set_ylabel("Scrap Rate (%)")
                 ax_m.set_xlabel("")
                 add_chart_border(ax_m)
