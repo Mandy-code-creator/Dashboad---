@@ -576,10 +576,10 @@ if uploaded_file is not None:
                 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
-            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC (NÂNG CẤP THÀNH HEATMAP)
+            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC (NÂNG CẤP THÀNH BIỂU ĐỒ NHIỆT - HEATMAP)
             st.markdown("---")
             st.subheader("🔍 Inventory Traceability (Production Origin of Used Coils)")
-            st.info("Visual matrix showing when the scrapped coils were originally produced.")
+            st.info("Visual matrix showing when the scrapped coils were originally produced. Red zones indicate high scrap rates.")
             
             trace_df = df_t6.groupby(['Display_Month', 'Time_Group']).agg(
                 Total_Length=(LEN_COL, 'sum'),
@@ -587,17 +587,26 @@ if uploaded_file is not None:
             ).reset_index()
             trace_df['Scrap_Rate (%)'] = np.where(trace_df['Total_Length'] > 0, (trace_df['Total_Scrap'] / trace_df['Total_Length']) * 100, 0).round(2)
             
-            # Tạo Pivot Table (Heatmap)
+            # Tạo Pivot Table cho Heatmap
             pivot_trace = trace_df.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
-            pivot_trace.index.name = "Usage Month (Tháng khách xài)"
-            pivot_trace.columns.name = "Production Period (Tháng SX)"
             
             st.markdown("**Scrap Rate (%) Heatmap by Usage vs. Production Month**")
-            st.dataframe(
-                pivot_trace.style.format("{:.2f}%", na_rep="-").background_gradient(cmap='Reds', axis=None),
-                use_container_width=True
-            )
             
+            # Vẽ Biểu đồ nhiệt Seaborn
+            fig_heat, ax_heat = plt.subplots(figsize=(10, max(4, len(pivot_trace) * 0.6)))
+            sns.heatmap(pivot_trace, annot=True, fmt=".1f", cmap="Reds", 
+                        linewidths=1, linecolor='white', 
+                        cbar_kws={'label': 'Scrap Rate (%)'}, ax=ax_heat,
+                        annot_kws={"size": 10, "weight": "bold"})
+            
+            ax_heat.set_ylabel("Usage Month (Tháng khách xài)", fontweight='bold')
+            ax_heat.set_xlabel("Production Period (Tháng SX)", fontweight='bold')
+            ax_heat.set_title("Traceability Matrix", fontweight='bold', pad=15)
+            plt.xticks(rotation=45, ha='right')
+            fig_heat.tight_layout()
+            st.pyplot(fig_heat)
+            
+            # Giấu bảng thô đi
             with st.expander("📂 View Detailed Traceability Data (Dành cho QC kéo xem chi tiết)"):
                 trace_detailed = trace_df.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
                 st.dataframe(
