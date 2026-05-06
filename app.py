@@ -409,9 +409,8 @@ if uploaded_file is not None:
         else:
             col_m3.metric("Date Range", "N/A")
             
-        st.markdown("### Full Filtered Data Preview")
-        # 🚀 XÓA LỆNH .head(50) ĐỂ HIỂN THỊ 100% DỮ LIỆU
-        st.dataframe(df, use_container_width=True)
+        st.markdown("### Filtered Data Preview")
+        st.dataframe(df.head(50), use_container_width=True)
 
     # ==========================================================
     # TASK 2: YIELD SUMMARY
