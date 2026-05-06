@@ -107,6 +107,7 @@ if uploaded_file is not None:
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
+    # STRICT FILTER FOR LIMIT CALCULATIONS: Only quality levels A or B
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
@@ -212,6 +213,49 @@ if uploaded_file is not None:
         if cpk >= 1.33: return '✅ Capable'
         if cpk >= 1.00: return '⚠️ Marginal'
         return '❌ Not Capable'
+
+    # KHÔI PHỤC LẠI HÀM VẼ BADGE BỊ THIẾU
+    def render_capability_badge(cap, feat, period_label, thickness):
+        if cap is None: return
+        
+        mu_v   = f"{cap['mean']:.2f}"
+        std_v  = f"{cap['std']:.3f}"
+        
+        if thickness == 'Overall':
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
+            lsl_v, usl_v = '—', '—'
+        elif is_valid_for_control(period_label):
+            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
+            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
+            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+            clr    = cpk_color(cap['Cpk'])
+            lbl    = cpk_label(cap['Cpk'], period_label, thickness)
+            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
+            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+        else:
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
+            lsl_v, usl_v = '—', '—'
+
+        html_badge = f"""
+        <div style="background:#f8f9fa;border-left:5px solid {clr};
+                    border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
+                    font-family:monospace;font-size:13px;line-height:1.8;">
+          <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>n</b>: {cap['n']} &nbsp;
+          <b>Mean</b>: {mu_v} &nbsp;
+          <b>Std</b>: {std_v}
+          <br>
+          <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
+          <b>Cp = {cp_v}</b> &nbsp;&nbsp;
+          <b>Ca = {ca_v}</b>
+        </div>
+        """
+        st.markdown(html_badge, unsafe_allow_html=True)
 
     def build_capability_summary(df_src, feat, label, thick):
         vals = df_src[feat].dropna().values if feat in df_src.columns else []
@@ -433,7 +477,6 @@ if uploaded_file is not None:
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
         if not grade_dist_display.empty:
-            # LỌC "2025 (Full Year)" KHỎI BIỂU ĐỒ NÀY
             chart_grade_dist = grade_dist_display[grade_dist_display.index != "2025 (Full Year)"]
             
             grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
@@ -561,14 +604,14 @@ if uploaded_file is not None:
             cols = st.columns(2)
             for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
                 with cols[idx % 2]:
-                    # ONLY ONE BADGE, Rendered above the chart
-                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
-                    vals_all = df_p_valid[f].dropna().values
-                    
                     fig, ax = plt.subplots(figsize=(8, 4.5))
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
+                    
+                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
+                    vals_all = df_p_valid[f].dropna().values
+                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -584,6 +627,10 @@ if uploaded_file is not None:
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
+                        
+                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
+                        vals_t = df_t_valid[f].dropna().values
+                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
             st.markdown("---")
 
     # ==========================================================
@@ -622,7 +669,6 @@ if uploaded_file is not None:
                 vals_all = plot_df[t4_feat].values
                 cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
                 
-                # RENDER BADGE HERE INSTEAD OF INSIDE THE CHART
                 render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
                 
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
@@ -672,7 +718,6 @@ if uploaded_file is not None:
                 ax_i.set_title(f"Individual (I) Chart - {t4_feat} ({t4_thick}mm)", fontweight='bold')
                 ax_i.set_ylabel("Value")
                 
-                # Push Legend completely outside the plot area
                 ax_i.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1, fontsize=8)
                 add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
@@ -689,7 +734,6 @@ if uploaded_file is not None:
                 ax_mr.set_title("Moving Range (MR) Chart", fontweight='bold')
                 ax_mr.set_ylabel("Range")
                 
-                # Push Legend completely outside the plot area
                 ax_mr.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
                 add_chart_border(ax_mr)
                 
