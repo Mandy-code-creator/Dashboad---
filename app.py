@@ -6,7 +6,6 @@ import numpy as np
 import io
 import seaborn as sns
 import re
-import datetime
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
@@ -36,50 +35,42 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.astype(str).str.strip()
 
-    # ==========================================
-    # 1. DATA PRE-PROCESSING (MASTER PIPELINE)
-    # ==========================================
-    
-    # 1.1 Rename core columns standard
-    rename_dict = {
-        'Thickness': 'Actual_Thickness', 
-        '厚度': 'Actual_Thickness',
-        '烤漆降伏強度': 'YS', 
-        '烤漆抗拉強度': 'TS', 
-        '伸長率': 'EL'
-    }
-    df.rename(columns=rename_dict, inplace=True)
-    
-    # XÓA CÁC CỘT TRÙNG LẶP (FIX LỖI TYPEERROR TẠI ĐÂY)
-    df = df.loc[:, ~df.columns.duplicated()]
-    
+    # --- 1. DATA PRE-PROCESSING ---
     if 'Actual_Thickness' not in df.columns:
-        for i, c in enumerate(df.columns):
-            if '型式' in c and i > 0:
-                df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
-                break
-                
-    # Chốt chặn xóa trùng lặp lần 2 để an toàn tuyệt đối
-    df = df.loc[:, ~df.columns.duplicated()]
-                
+        if 'Thickness' in df.columns:
+            df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
+        elif '厚度' in df.columns:
+            df.rename(columns={'厚度': 'Actual_Thickness'}, inplace=True)
+        else:
+            for i, c in enumerate(df.columns):
+                if '型式' in c and i > 0:
+                    df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
+                    break
+    
+    if 'Actual_Thickness' in df.columns:
+        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
+        
+        def map_thickness(val):
+            if pd.isna(val): return None
+            v = round(float(val), 2)
+            if v in [0.47, 0.50]: return 0.5
+            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
+            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
+            return None 
+            
+        df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
+        df = df.dropna(subset=['Standard_Thickness'])
+        df['Actual_Thickness'] = df['Standard_Thickness']
+        df = df.drop(columns=['Standard_Thickness'])
+    else:
+        df['Actual_Thickness'] = 0.0
+        df = df.iloc[0:0]
+
     if '熱軋材質' in df.columns:
         df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
     else:
         df['HR_Material'] = 'Unknown'
 
-    # 1.2 Numeric Conversions
-    LEN_COL = '實測長度'
-    SCRAP_COL = '尾料剔退'
-    if LEN_COL in df.columns:
-        df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
-    if SCRAP_COL in df.columns:
-        df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
-        
-    for f in ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']:
-        if f in df.columns:
-            df[f] = pd.to_numeric(df[f], errors='coerce')
-
-    # 1.3 Date & Time Grouping
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -89,6 +80,7 @@ if uploaded_file is not None:
             if pd.isnull(d): return "Unknown"
             y = d.year
             q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
+            
             if y == 2024: return "2024 (Full Year)"
             if y == 2025:
                 if d < q3_s: return "2025 H1 (Until 06/28)"
@@ -107,44 +99,39 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # 1.4 Grade Calculations
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
-        match_cols = [c for c in df.columns if str(c).strip() == g or str(c).strip() == f"{g}個數" or str(c).strip().startswith(f"{g}.")]
+        match_cols = []
+        for c in df.columns:
+            c_str = str(c).strip()
+            if c_str == g or c_str == f"{g}個數" or c_str.startswith(f"{g}."):
+                match_cols.append(c)
         df[g] = df[match_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if match_cols else 0
 
     df['Total_Qty'] = df[base_grades].sum(axis=1)
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
-    df['Valid_Qty'] = df[['A-B+', 'A-B']].sum(axis=1)
 
-    # ==========================================
-    # LƯU TRỮ DỮ LIỆU GỐC CHO TASK 6 (KHÁCH HÀNG)
-    # ==========================================
-    df_global = df.copy()
+    target_grades = ['A-B+', 'A-B']
+    df['Valid_Qty'] = df[target_grades].sum(axis=1)
+
     df_global_grades = df[df['Total_Qty'] > 0].copy()
 
-    # 1.5 Thickness Filtering (For detailed Tasks 2, 3, 4, 5)
-    if 'Actual_Thickness' in df.columns:
-        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
-        def map_thickness(val):
-            if pd.isna(val): return None
-            v = round(float(val), 2)
-            if v in [0.47, 0.50]: return 0.5
-            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
-            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
-            return None 
-        df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
-        df = df.dropna(subset=['Standard_Thickness'])
-        df['Actual_Thickness'] = df['Standard_Thickness']
-        df = df.drop(columns=['Standard_Thickness'])
-    else:
-        df['Actual_Thickness'] = 0.0
-        df = df.iloc[0:0]
+    df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
+    mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
+    for f in mech_features:
+        if f in df.columns:
+            df[f] = pd.to_numeric(df[f], errors='coerce')
+
+    LEN_COL = '實測長度'
+    SCRAP_COL = '尾料剔退'
+    if LEN_COL in df.columns:
+        df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
+    if SCRAP_COL in df.columns:
+        df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
 
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
-    # --- STYLE CONFIG ---
     sns.set_theme(style="whitegrid")
     solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
@@ -950,43 +937,27 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer scrap rates based on Usage Date. AI automatically parses full dates and filters split-coils to isolate machine impact from material quality.")
+        st.info("Analyzing customer scrap rates based on Usage Month. AI automatically filters split-coils to isolate machine impact from material quality.")
         
-        # SMART COLUMN DETECTION FOR USAGE DATE
-        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-        USAGE_COL = next((c for c in possible_usage_cols if c in df_global.columns), None)
-        
+        USAGE_COL = '使用月份'
         COIL_ID_COL = '鋼捲號碼'
         
-        if USAGE_COL and COIL_ID_COL in df_global.columns and LEN_COL in df_global.columns and SCRAP_COL in df_global.columns:
-            df_t6 = df_global.copy()
+        if USAGE_COL in df.columns and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns:
+            df_t6 = df.copy()
+            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip().replace(['nan', 'None', ''], np.nan)
+            df_t6 = df_t6.dropna(subset=[USAGE_COL])
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
-            df_t6 = df_t6.dropna(subset=[USAGE_COL, COIL_ID_COL])
             
-            # --- 1. SMART DATE PARSING ---
-            def extract_month_num(m_val):
-                if pd.isna(m_val): return 99
-                # Nếu là định dạng thời gian chuẩn của Excel/Pandas
-                if isinstance(m_val, (pd.Timestamp, np.datetime64, datetime.date)):
-                    return m_val.month
+            # --- 1. SMART MONTH PARSING & SORTING ---
+            def extract_month_num(m_str):
+                nums = re.findall(r'\d+', str(m_str))
+                if nums:
+                    val = int(nums[-1])
+                    if val > 100: 
+                        val = int(str(val)[-2:])
+                    return val
+                return 99 
                 
-                m_str = str(m_val).strip()
-                try:
-                    dt = pd.to_datetime(m_str)
-                    return dt.month
-                except:
-                    # Bắt định dạng dạng ngày tháng như YYYY/MM/DD
-                    match = re.search(r'\d{4}[-/](\d{1,2})', m_str)
-                    if match: return int(match.group(1))
-                    
-                    # Bắt chữ chứa số (ví dụ: '4月')
-                    nums = re.findall(r'\d+', m_str)
-                    if nums:
-                        val = int(nums[-1])
-                        if val > 12: val = int(str(val)[-2:])
-                        return val
-                    return 99 
-                    
             df_t6['Month_Num'] = df_t6[USAGE_COL].apply(extract_month_num)
             df_t6 = df_t6[df_t6['Month_Num'] <= 12] 
             df_t6 = df_t6.sort_values('Month_Num')
@@ -1100,7 +1071,7 @@ if uploaded_file is not None:
                 mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
                 st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
         else:
-            st.warning(f"Required column '{USAGE_COL}' or related calculation columns not found in the dataset.")
+            st.warning(f"Required columns '{USAGE_COL}', '{COIL_ID_COL}', '{LEN_COL}', or '{SCRAP_COL}' not found in the dataset.")
 
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
