@@ -36,42 +36,44 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.astype(str).str.strip()
 
-    # --- 1. DATA PRE-PROCESSING ---
-    if 'Actual_Thickness' not in df.columns:
-        if 'Thickness' in df.columns:
-            df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
-        elif '厚度' in df.columns:
-            df.rename(columns={'厚度': 'Actual_Thickness'}, inplace=True)
-        else:
-            for i, c in enumerate(df.columns):
-                if '型式' in c and i > 0:
-                    df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
-                    break
+    # ==========================================
+    # 1. DATA PRE-PROCESSING (MASTER PIPELINE)
+    # ==========================================
     
-    if 'Actual_Thickness' in df.columns:
-        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
-        
-        def map_thickness(val):
-            if pd.isna(val): return None
-            v = round(float(val), 2)
-            if v in [0.47, 0.50]: return 0.5
-            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
-            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
-            return None 
-            
-        df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
-        df = df.dropna(subset=['Standard_Thickness'])
-        df['Actual_Thickness'] = df['Standard_Thickness']
-        df = df.drop(columns=['Standard_Thickness'])
-    else:
-        df['Actual_Thickness'] = 0.0
-        df = df.iloc[0:0]
-
+    # 1.1 Rename core columns standard
+    rename_dict = {
+        'Thickness': 'Actual_Thickness', 
+        '厚度': 'Actual_Thickness',
+        '烤漆降伏強度': 'YS', 
+        '烤漆抗拉強度': 'TS', 
+        '伸長率': 'EL'
+    }
+    df.rename(columns=rename_dict, inplace=True)
+    
+    if 'Actual_Thickness' not in df.columns:
+        for i, c in enumerate(df.columns):
+            if '型式' in c and i > 0:
+                df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
+                break
+                
     if '熱軋材質' in df.columns:
         df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
     else:
         df['HR_Material'] = 'Unknown'
 
+    # 1.2 Numeric Conversions
+    LEN_COL = '實測長度'
+    SCRAP_COL = '尾料剔退'
+    if LEN_COL in df.columns:
+        df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
+    if SCRAP_COL in df.columns:
+        df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
+        
+    for f in ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']:
+        if f in df.columns:
+            df[f] = pd.to_numeric(df[f], errors='coerce')
+
+    # 1.3 Date & Time Grouping
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -81,7 +83,6 @@ if uploaded_file is not None:
             if pd.isnull(d): return "Unknown"
             y = d.year
             q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
-            
             if y == 2024: return "2024 (Full Year)"
             if y == 2025:
                 if d < q3_s: return "2025 H1 (Until 06/28)"
@@ -100,39 +101,44 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
+    # 1.4 Grade Calculations
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
-        match_cols = []
-        for c in df.columns:
-            c_str = str(c).strip()
-            if c_str == g or c_str == f"{g}個數" or c_str.startswith(f"{g}."):
-                match_cols.append(c)
+        match_cols = [c for c in df.columns if str(c).strip() == g or str(c).strip() == f"{g}個數" or str(c).strip().startswith(f"{g}.")]
         df[g] = df[match_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if match_cols else 0
 
     df['Total_Qty'] = df[base_grades].sum(axis=1)
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
+    df['Valid_Qty'] = df[['A-B+', 'A-B']].sum(axis=1)
 
-    target_grades = ['A-B+', 'A-B']
-    df['Valid_Qty'] = df[target_grades].sum(axis=1)
-
+    # ==========================================
+    # ---> SAVE GLOBAL DF HERE (FIX FOR TASK 6) <---
+    # ==========================================
+    df_global = df.copy()
     df_global_grades = df[df['Total_Qty'] > 0].copy()
 
-    df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
-    mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
-    for f in mech_features:
-        if f in df.columns:
-            df[f] = pd.to_numeric(df[f], errors='coerce')
-
-    LEN_COL = '實測長度'
-    SCRAP_COL = '尾料剔退'
-    if LEN_COL in df.columns:
-        df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
-    if SCRAP_COL in df.columns:
-        df[SCRAP_COL] = pd.to_numeric(df[SCRAP_COL], errors='coerce').fillna(0)
+    # 1.5 Thickness Filtering (For detailed Tasks 2, 3, 4, 5)
+    if 'Actual_Thickness' in df.columns:
+        df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
+        def map_thickness(val):
+            if pd.isna(val): return None
+            v = round(float(val), 2)
+            if v in [0.47, 0.50]: return 0.5
+            if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
+            if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
+            return None 
+        df['Standard_Thickness'] = df['Actual_Thickness'].apply(map_thickness)
+        df = df.dropna(subset=['Standard_Thickness'])
+        df['Actual_Thickness'] = df['Standard_Thickness']
+        df = df.drop(columns=['Standard_Thickness'])
+    else:
+        df['Actual_Thickness'] = 0.0
+        df = df.iloc[0:0]
 
     df = df[(df['Total_Qty'] > 0) | (df.get(LEN_COL, 0) > 0) | (df.get(SCRAP_COL, 0) > 0)]
 
+    # --- STYLE CONFIG ---
     sns.set_theme(style="whitegrid")
     solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
@@ -954,7 +960,7 @@ if uploaded_file is not None:
             # --- 1. SMART DATE PARSING ---
             def extract_month_num(m_val):
                 if pd.isna(m_val): return 99
-                # If it's already a native Date/Datetime object from Excel
+                # Nếu là định dạng thời gian chuẩn của Excel/Pandas
                 if isinstance(m_val, (pd.Timestamp, np.datetime64, datetime.date)):
                     return m_val.month
                 
@@ -963,11 +969,11 @@ if uploaded_file is not None:
                     dt = pd.to_datetime(m_str)
                     return dt.month
                 except:
-                    # Regex fallback for YYYY/MM/DD or YYYY-MM-DD
+                    # Bắt định dạng dạng ngày tháng như YYYY/MM/DD
                     match = re.search(r'\d{4}[-/](\d{1,2})', m_str)
                     if match: return int(match.group(1))
                     
-                    # Regex fallback for '4月' or purely numbers
+                    # Bắt chữ chứa số (ví dụ: '4月')
                     nums = re.findall(r'\d+', m_str)
                     if nums:
                         val = int(nums[-1])
