@@ -576,25 +576,36 @@ if uploaded_file is not None:
                 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
-            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC
+            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC (NÂNG CẤP THÀNH HEATMAP)
             st.markdown("---")
             st.subheader("🔍 Inventory Traceability (Production Origin of Used Coils)")
-            st.info("This table shows exactly WHEN the coils used by the customer in a given month were actually produced by our factory.")
+            st.info("Visual matrix showing when the scrapped coils were originally produced.")
             
             trace_df = df_t6.groupby(['Display_Month', 'Time_Group']).agg(
-                Coil_Count=(COIL_ID_COL, 'nunique'),
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum')
             ).reset_index()
             trace_df['Scrap_Rate (%)'] = np.where(trace_df['Total_Length'] > 0, (trace_df['Total_Scrap'] / trace_df['Total_Length']) * 100, 0).round(2)
-            trace_df.rename(columns={'Display_Month': 'Usage Month (Khách hàng dùng)', 'Time_Group': 'Production Period (Nhà máy sản xuất)'}, inplace=True)
             
+            # Tạo Pivot Table (Heatmap)
+            pivot_trace = trace_df.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
+            pivot_trace.index.name = "Usage Month (Tháng khách xài)"
+            pivot_trace.columns.name = "Production Period (Tháng SX)"
+            
+            st.markdown("**Scrap Rate (%) Heatmap by Usage vs. Production Month**")
             st.dataframe(
-                trace_df.style.format({
-                    'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'
-                }).background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
-                use_container_width=True, hide_index=True
+                pivot_trace.style.format("{:.2f}%", na_rep="-").background_gradient(cmap='Reds', axis=None),
+                use_container_width=True
             )
+            
+            with st.expander("📂 View Detailed Traceability Data (Dành cho QC kéo xem chi tiết)"):
+                trace_detailed = trace_df.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
+                st.dataframe(
+                    trace_detailed.style.format({
+                        'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'
+                    }).background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
+                    use_container_width=True, hide_index=True
+                )
 
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Diagnosis")
