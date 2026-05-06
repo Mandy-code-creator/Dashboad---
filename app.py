@@ -48,7 +48,6 @@ if uploaded_file is not None:
     }
     df.rename(columns=rename_dict, inplace=True)
     
-    # Merge thickness columns if split
     if 'Actual_Thickness' in df.columns and isinstance(df.get('Actual_Thickness'), pd.DataFrame):
         df['Temp_Thick'] = df['Actual_Thickness'].bfill(axis=1).iloc[:, 0]
         df = df.drop(columns=['Actual_Thickness'])
@@ -102,7 +101,7 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Grades & Qty Calculations (Fixed KeyError here)
+    # Grades
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = [c for c in df.columns if str(c).strip() == g or str(c).strip().startswith(f"{g}.")]
@@ -115,7 +114,6 @@ if uploaded_file is not None:
 
     df_global = df.copy()
 
-    # Detailed filtering for Task 2-5
     if 'Actual_Thickness' in df.columns:
         df['Actual_Thickness'] = pd.to_numeric(df['Actual_Thickness'], errors='coerce')
         def map_thickness(val):
@@ -147,6 +145,122 @@ if uploaded_file is not None:
             spine.set_color('#333333')
             spine.set_linewidth(1.0)
 
+    # ==========================================================
+    # GLOBAL SPC CAPABILITY FUNCTIONS (Khôi phục toàn diện)
+    # ==========================================================
+    def is_valid_for_control(period_label):
+        if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
+            return False
+        return True
+
+    def calc_capability(values, feat, period_label, thickness):
+        vals = np.array(values, dtype=float)
+        vals = vals[~np.isnan(vals)]
+        
+        if thickness == 'Overall':
+            return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
+                    'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
+
+        if len(vals) < 2: return None
+        mu  = np.mean(vals)
+        std = np.std(vals, ddof=1)
+        if std == 0: return None
+
+        spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
+        lsl  = spec.get('min')
+        usl  = spec.get('max')
+        tgt  = spec.get('target')
+
+        result = {'mean': mu, 'std': std, 'n': len(vals),
+                  'Cp': None, 'Cpk': None, 'Ca': None,
+                  'LSL': lsl, 'USL': usl, 'Target': tgt}
+
+        if not is_valid_for_control(period_label):
+            return result
+
+        if lsl is not None and usl is not None:
+            cp   = (usl - lsl) / (6 * std)
+            cpu  = (usl - mu)  / (3 * std)
+            cpl  = (mu  - lsl) / (3 * std)
+            cpk  = min(cpu, cpl)
+            result['Cp']  = round(cp,  3)
+            result['Cpk'] = round(cpk, 3)
+            if tgt is not None:
+                ca = (mu - tgt) / ((usl - lsl) / 2) * 100
+                result['Ca'] = round(ca, 2)
+            else:
+                mid = (usl + lsl) / 2
+                ca  = (mu - mid) / ((usl - lsl) / 2) * 100
+                result['Ca'] = round(ca, 2)
+        elif lsl is not None:
+            cpl = (mu - lsl) / (3 * std)
+            result['Cp']  = round(cpl, 3)
+            result['Cpk'] = round(cpl, 3)
+        elif usl is not None:
+            cpu = (usl - mu) / (3 * std)
+            result['Cp']  = round(cpu, 3)
+            result['Cpk'] = round(cpu, 3)
+
+        return result
+
+    def cpk_color(cpk):
+        if cpk is None: return '#888888'
+        if cpk >= 1.67: return '#2e7d32'   
+        if cpk >= 1.33: return '#66bb6a'   
+        if cpk >= 1.00: return '#ffa726'   
+        return '#d62728'                   
+
+    def cpk_label(cpk, period_label, thickness):
+        if thickness == 'Overall': return 'Mixed Specs'
+        if not is_valid_for_control(period_label): return 'Not Monitored'
+        if cpk is None: return 'N/A'
+        if cpk >= 1.67: return '✅ Excellent'
+        if cpk >= 1.33: return '✅ Capable'
+        if cpk >= 1.00: return '⚠️ Marginal'
+        return '❌ Not Capable'
+
+    def render_capability_badge(cap, feat, period_label, thickness):
+        if cap is None: return
+        
+        mu_v   = f"{cap['mean']:.2f}"
+        std_v  = f"{cap['std']:.3f}"
+        
+        if thickness == 'Overall':
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Mixed Thickness (No Global Limit)'
+            lsl_v, usl_v = '—', '—'
+        elif is_valid_for_control(period_label):
+            cp_v   = f"{cap['Cp']:.3f}"   if cap['Cp']  is not None else 'N/A'
+            cpk_v  = f"{cap['Cpk']:.3f}"  if cap['Cpk'] is not None else 'N/A'
+            ca_v   = f"{cap['Ca']:.1f}%"  if cap['Ca']  is not None else 'N/A'
+            clr    = cpk_color(cap['Cpk'])
+            lbl    = cpk_label(cap['Cpk'], period_label, thickness)
+            lsl_v  = str(cap['LSL']) if cap['LSL'] is not None else '—'
+            usl_v  = str(cap['USL']) if cap['USL'] is not None else '—'
+        else:
+            cp_v, cpk_v, ca_v = 'N/A', 'N/A', 'N/A'
+            clr, lbl = '#888888', 'Pre-Q4 2025 (Not Monitored)'
+            lsl_v, usl_v = '—', '—'
+
+        html_badge = f"""
+        <div style="background:#f8f9fa;border-left:5px solid {clr};
+                    border-radius:6px;padding:8px 14px;margin:4px 0 10px 0;
+                    font-family:monospace;font-size:13px;line-height:1.8;">
+          <span style="font-size:14px;font-weight:bold;color:{clr};">{lbl}</span>
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>LSL</b>: {lsl_v} &nbsp; <b>USL</b>: {usl_v}
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <b>n</b>: {cap['n']} &nbsp;
+          <b>Mean</b>: {mu_v} &nbsp;
+          <b>Std</b>: {std_v}
+          <br>
+          <b style="color:{clr};">Cpk = {cpk_v}</b> &nbsp;&nbsp;
+          <b>Cp = {cp_v}</b> &nbsp;&nbsp;
+          <b>Ca = {ca_v}</b>
+        </div>
+        """
+        st.markdown(html_badge, unsafe_allow_html=True)
+
     # --- TABS ---
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📁 1. Raw Data", "📋 2. Quality Yield", "📈 3. Capability (SPC)", 
@@ -170,19 +284,6 @@ if uploaded_file is not None:
 
     with tab3:
         st.header("3. Distribution & Process Capability (SPC)")
-        def calc_cap(values, feat, thick):
-            vals = np.array(values, dtype=float); vals = vals[~np.isnan(vals)]
-            if len(vals) < 2: return None
-            mu = np.mean(vals); std = np.std(vals, ddof=1)
-            spec = GLOBAL_SPECS.get(thick, {}).get(feat, {})
-            lsl, usl = spec.get('min'), spec.get('max')
-            res = {'mean': mu, 'std': std, 'n': len(vals), 'Cpk': None}
-            if lsl is not None and usl is not None:
-                res['Cpk'] = min((usl - mu) / (3 * std), (mu - lsl) / (3 * std))
-            elif lsl is not None: res['Cpk'] = (mu - lsl) / (3 * std)
-            elif usl is not None: res['Cpk'] = (usl - mu) / (3 * std)
-            return res
-
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
         cap_summary = []
         for p in ordered_periods:
@@ -191,62 +292,117 @@ if uploaded_file is not None:
             for t in sorted(df['Actual_Thickness'].unique()):
                 df_t = df_p[df_p['Actual_Thickness'] == t]
                 if df_t.empty: continue
-                for f in ['YS', 'TS', 'EL']:
+                for f in ['YS', 'TS', 'EL', 'YPE']:
                     if f in df_t.columns:
-                        c = calc_cap(df_t[f].values, f, t)
-                        if c: cap_summary.append({'Period': p, 'Thick': t, 'Feature': f, 'n': c['n'], 'Mean': c['mean'], 'Cpk': c['Cpk']})
-        if cap_summary: st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
+                        c = calc_capability(df_t[f].values, f, p, t)
+                        if c and c['n'] >= 2: 
+                            cap_summary.append({
+                                'Period': p, 'Thick': t, 'Feature': f, 'n': c['n'], 
+                                'Mean': round(c['mean'],2), 'Std': round(c['std'],3), 
+                                'Cpk': round(c['Cpk'],3) if c.get('Cpk') is not None else None
+                            })
+        if cap_summary: 
+            st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
+    # ==========================================================
+    # TASK 4: I-MR TRACKING (KHÔI PHỤC HOÀN TOÀN CÁC THÔNG SỐ)
+    # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
-        df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
+        
+        # 🚀 SỬA LỖI MỐC THỜI GIAN: Bắt đầu từ Quý 4 năm 2025 (Tháng 10/2025 trở đi)
+        df_t4 = df[df['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
         
         if df_t4.empty:
-            st.warning("No valid data available (Grades A/B) for 2026 onwards.")
+            st.warning("No valid data available (Grades A/B) from Q4/2025 onwards.")
         else:
             t4_thick = st.selectbox("Select Thickness Category:", ['Overall'] + sorted(df_t4['Actual_Thickness'].dropna().unique().tolist()))
             plot_df_base = df_t4 if t4_thick == 'Overall' else df_t4[df_t4['Actual_Thickness'] == t4_thick]
                 
-            for t4_feat in ['YS', 'TS', 'EL']:
+            for t4_feat in ['YS', 'TS', 'EL', 'YPE']:
                 if t4_feat not in plot_df_base.columns: continue
-                plot_df = plot_df_base.sort_values('Production_Date').dropna(subset=[t4_feat])
+                
+                # Sắp xếp và dọn dẹp dữ liệu để trục X không bị sai
+                plot_df = plot_df_base.sort_values('Production_Date').dropna(subset=[t4_feat]).reset_index(drop=True)
                 if len(plot_df) < 2: continue
                     
-                st.markdown(f"### Feature: {t4_feat}")
-                vals = plot_df[t4_feat].values
-                dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
+                st.markdown("---")
+                st.markdown(f"### 🎯 Feature: {t4_feat}")
                 
+                vals = plot_df[t4_feat].values
+                dates = plot_df['Production_Date'].dt.strftime('%m/%d')
+                
+                # 🚀 HIỂN THỊ LẠI BẢNG SPC CỦA GIAI ĐOẠN CẢI THIỆN
+                cap_data = calc_capability(vals, t4_feat, 'Q4 2025 Onwards', t4_thick)
+                render_capability_badge(cap_data, t4_feat, 'Q4 2025 Onwards', t4_thick)
+                
+                # Tính toán giới hạn
                 mean_v = np.mean(vals); mr = np.abs(np.diff(vals)); mr_mean = np.mean(mr)
                 ucl_i = mean_v + 2.66 * mr_mean; lcl_i = max(0, mean_v - 2.66 * mr_mean)
                 
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 9), gridspec_kw={'height_ratios': [2, 1]})
                 
-                ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.5, label='Data')
-                ax1.axhline(mean_v, color='green', ls='--'); ax1.axhline(ucl_i, color='red', ls='--'); ax1.axhline(lcl_i, color='red', ls='--')
+                # --- I-Chart ---
+                ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.6, label='Actual Data')
                 
-                # Highlight logic
+                x_max = len(vals) - 1
+                ax1.set_xlim(-len(vals)*0.05, len(vals)*1.15) # Mở rộng lề phải để in text
+                
+                # Vẽ và in text Mean, UCL, LCL
+                ax1.axhline(mean_v, color='green', ls='--')
+                ax1.text(x_max, mean_v, f'  Mean: {mean_v:.1f}', color='green', va='center', fontweight='bold', fontsize=9)
+                
+                ax1.axhline(ucl_i, color='red', ls='--')
+                ax1.text(x_max, ucl_i, f'  UCL: {ucl_i:.1f}', color='red', va='bottom', fontweight='bold', fontsize=9)
+                
+                ax1.axhline(lcl_i, color='red', ls='--')
+                ax1.text(x_max, lcl_i, f'  LCL: {lcl_i:.1f}', color='red', va='top', fontweight='bold', fontsize=9)
+                
+                # Tô đỏ điểm vi phạm
                 out_control = np.where((vals > ucl_i) | (vals < lcl_i))[0]
                 if len(out_control) > 0:
-                    ax1.scatter(out_control, vals[out_control], color='red', s=80, zorder=5, label='Out of Control (SPC)')
+                    ax1.scatter(out_control, vals[out_control], color='red', s=90, zorder=5, label='Out of Control (SPC)')
                 
+                # Spec Limits
                 spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
                 usl, lsl = spec.get('max'), spec.get('min')
                 if usl is not None: 
-                    ax1.axhline(usl, color='darkred', lw=2, label=f'USL: {usl}')
+                    ax1.axhline(usl, color='darkred', lw=2)
+                    ax1.text(0, usl, f'USL: {usl}  ', color='darkred', va='center', ha='right', fontweight='bold', fontsize=9)
                     out_usl = np.where(vals > usl)[0]
-                    ax1.scatter(out_usl, vals[out_usl], facecolors='none', edgecolors='darkred', s=150, lw=2, zorder=6, label='Out of Spec (USL)')
+                    ax1.scatter(out_usl, vals[out_usl], marker='x', color='darkred', s=120, lw=2, zorder=6, label='Out of Spec (USL)')
                 if lsl is not None: 
-                    ax1.axhline(lsl, color='darkred', lw=2, label=f'LSL: {lsl}')
+                    ax1.axhline(lsl, color='darkred', lw=2)
+                    ax1.text(0, lsl, f'LSL: {lsl}  ', color='darkred', va='center', ha='right', fontweight='bold', fontsize=9)
                     out_lsl = np.where(vals < lsl)[0]
-                    ax1.scatter(out_lsl, vals[out_lsl], facecolors='none', edgecolors='darkred', s=150, lw=2, zorder=6, label='Out of Spec (LSL)')
+                    ax1.scatter(out_lsl, vals[out_lsl], marker='x', color='darkred', s=120, lw=2, zorder=6, label='Out of Spec (LSL)')
 
-                ax1.set_title(f"Individual Chart - {t4_feat}"); ax1.legend(loc='upper right', fontsize=8)
+                ax1.set_title(f"Individual (I) Chart - {t4_feat}", fontsize=11, fontweight='bold')
+                ax1.legend(loc='upper right', fontsize=8)
+                
+                # Trục X hiển thị ngày tháng
+                step = max(1, len(vals) // 25)
+                ax1.set_xticks(range(0, len(vals), step))
+                ax1.set_xticklabels(dates.iloc[::step], rotation=30, ha='right', fontsize=8)
                 add_chart_border(ax1)
                 
+                # --- MR-Chart ---
                 ax2.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', alpha=0.6)
-                ax2.axhline(mr_mean, color='green', ls='--'); ax2.axhline(3.267 * mr_mean, color='red', ls='--')
-                ax2.set_title("Moving Range Chart"); add_chart_border(ax2)
+                ax2.axhline(mr_mean, color='green', ls='--')
+                ax2.text(len(mr)-1, mr_mean, f'  Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9)
+                
+                ucl_mr = 3.267 * mr_mean
+                ax2.axhline(ucl_mr, color='red', ls='--')
+                ax2.text(len(mr)-1, ucl_mr, f'  UCL MR: {ucl_mr:.1f}', color='red', va='bottom', fontweight='bold', fontsize=9)
+                
+                ax2.set_title("Moving Range (MR) Chart", fontsize=10, fontweight='bold')
+                ax2.set_xlim(-len(vals)*0.05, len(vals)*1.15)
+                ax2.set_xticks(range(0, len(vals)-1, step))
+                ax2.set_xticklabels(dates.iloc[1::step], rotation=30, ha='right', fontsize=8)
+                add_chart_border(ax2)
+                
+                fig.tight_layout()
                 st.pyplot(fig)
 
     with tab5:
