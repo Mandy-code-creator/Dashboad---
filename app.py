@@ -52,7 +52,7 @@ if uploaded_file is not None:
         def map_thickness(val):
             if pd.isna(val): return None
             v = round(float(val), 2)
-            if v in [0.47, 0.50]: return 0.5
+            if v in [0.47, 0.48,0.50]: return 0.5
             if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
             if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
             return None 
