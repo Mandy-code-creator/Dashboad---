@@ -305,11 +305,12 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
     # ==========================================================
-    # TASK 4: I-MR TRACKING (VÁ LỖI LABEL OVERLAP)
+    # TASK 4: I-MR TRACKING (SỬA TRỤC X THEO THÁNG)
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
         
+        # Bắt đầu từ Quý 4 năm 2025
         df_t4 = df[df['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
         
@@ -329,7 +330,9 @@ if uploaded_file is not None:
                 st.markdown(f"### 🎯 Feature: {t4_feat}")
                 
                 vals = plot_df[t4_feat].values
-                dates = plot_df['Production_Date'].dt.strftime('%m/%d')
+                
+                # 🚀 HIỂN THỊ NĂM-THÁNG TRÊN TRỤC X (YYYY-MM)
+                dates = plot_df['Production_Date'].dt.strftime('%Y-%m')
                 
                 cap_data = calc_capability(vals, t4_feat, 'Q4 2025 Onwards', t4_thick)
                 render_capability_badge(cap_data, t4_feat, 'Q4 2025 Onwards', t4_thick)
@@ -341,14 +344,10 @@ if uploaded_file is not None:
                 
                 ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.6, label='Actual Data')
                 
-                # 🚀 BBOX STYLE: Tạo hộp nền trắng mờ chống đè lên vạch
                 bbox_props = dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none")
-                
-                # Mở rộng trục X sang 2 bên để có không gian ghi Text
                 x_max = len(vals)
                 ax1.set_xlim(-1, x_max + 1) 
                 
-                # Plot Lines & Labels cho SPC
                 ax1.axhline(mean_v, color='green', ls='--')
                 ax1.text(x_max, mean_v, f' Mean: {mean_v:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
@@ -362,7 +361,6 @@ if uploaded_file is not None:
                 if len(out_control) > 0:
                     ax1.scatter(out_control, vals[out_control], color='red', s=90, zorder=5, label='Out of Control (SPC)')
                 
-                # Spec Limits
                 spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
                 usl, lsl = spec.get('max'), spec.get('min')
                 if usl is not None: 
@@ -377,13 +375,11 @@ if uploaded_file is not None:
                     ax1.scatter(out_lsl, vals[out_lsl], marker='x', color='darkred', s=120, lw=2, zorder=6, label='Out of Spec (LSL)')
 
                 ax1.set_title(f"Individual (I) Chart - {t4_feat}", fontsize=11, fontweight='bold')
-                
-                # Legend ra ngoài biểu đồ để không che data
                 ax1.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
                 
                 step = max(1, len(vals) // 25)
                 ax1.set_xticks(range(0, len(vals), step))
-                ax1.set_xticklabels(dates.iloc[::step], rotation=30, ha='right', fontsize=8)
+                ax1.set_xticklabels(dates.iloc[::step], rotation=45, ha='right', fontsize=9)
                 add_chart_border(ax1)
                 
                 # MR-Chart
@@ -398,14 +394,14 @@ if uploaded_file is not None:
                 ax2.set_title("Moving Range (MR) Chart", fontsize=10, fontweight='bold')
                 ax2.set_xlim(-1, x_max + 1)
                 ax2.set_xticks(range(0, len(vals)-1, step))
-                ax2.set_xticklabels(dates.iloc[1::step], rotation=30, ha='right', fontsize=8)
+                ax2.set_xticklabels(dates.iloc[1::step], rotation=45, ha='right', fontsize=9)
                 add_chart_border(ax2)
                 
                 fig.tight_layout()
                 st.pyplot(fig)
 
     # ==========================================================
-    # TASK 5: TAIL SCRAP (KHÔI PHỤC TOÀN BỘ CÁC BIỂU ĐỒ)
+    # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
