@@ -52,7 +52,7 @@ if uploaded_file is not None:
         def map_thickness(val):
             if pd.isna(val): return None
             v = round(float(val), 2)
-            if v in [0.47, 0.48,0.50]: return 0.5
+            if v in [0.47, 0.50]: return 0.5
             if v in [0.53, 0.54, 0.57, 0.58, 0.60]: return 0.6
             if v in [0.63, 0.75, 0.76, 0.77, 0.80]: return 0.8
             return None 
@@ -98,14 +98,12 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # ROBUST QUALITY GRADE MAPPING (Ignores hidden spaces in Excel headers)
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
-        g_clean = g.replace(" ", "")
         match_cols = []
         for c in df.columns:
-            c_clean = str(c).strip().replace(" ", "")
-            if c_clean == g_clean or c_clean == f"{g_clean}個數" or c_clean.startswith(f"{g_clean}."):
+            c_str = str(c).strip()
+            if c_str == g or c_str == f"{g}個數" or c_str.startswith(f"{g}."):
                 match_cols.append(c)
         df[g] = df[match_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if match_cols else 0
 
@@ -115,6 +113,8 @@ if uploaded_file is not None:
 
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
+
+    df_global_grades = df[df['Total_Qty'] > 0].copy()
 
     df.rename(columns={'烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'}, inplace=True)
     mech_features = ['YS', 'TS', 'EL', 'YPE', 'HARDNESS']
@@ -369,12 +369,13 @@ if uploaded_file is not None:
         add_chart_border(ax)
 
     # --- TABS ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📁 1. Raw Data", 
         "📋 2. Quality Yield", 
         "📈 3. Capability (SPC)", 
         "📉 4. I-MR Tracking",
-        "✂️ 5. Tail Scrap"
+        "✂️ 5. Tail Scrap",
+        "🎯 6. Customer End-Use"
     ])
 
     # ==========================================================
@@ -434,9 +435,9 @@ if uploaded_file is not None:
 
         st.markdown("---")
         st.subheader("📊 Grade Distribution by Time Period (%)")
-        st.caption("Note: Percentages represent only the target thickness groups (0.5mm, 0.6mm, 0.8mm).")
+        st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
-        grade_dist = df.groupby('Time_Group')[base_grades].sum()
+        grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
         grade_dist_display = pd.DataFrame()
@@ -482,7 +483,7 @@ if uploaded_file is not None:
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
         if not grade_dist_display.empty:
-            chart_grade_dist = grade_dist_display[grade_dist_display.index != "2025 (Full Year)"]
+            chart_grade_dist = grade_dist_display[~grade_dist_display.index.astype(str).str.contains("2025 \(Full Year\)", regex=True)]
             
             grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
             chart_grade_dist.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
@@ -507,7 +508,7 @@ if uploaded_file is not None:
             st.markdown("**Yield (%) by Period & Thickness**")
             fig_y, ax_y = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
-                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
+                chart_df = yield_summary[~yield_summary['Time_Group'].astype(str).str.contains("2025 \(Full Year\)", regex=True)]
                 pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
                 if not pivot_y.empty:
                     pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
@@ -527,7 +528,7 @@ if uploaded_file is not None:
             st.markdown("**Defect Rate (%) by Period & Thickness**")
             fig_d, ax_d = plt.subplots(figsize=(8, 4))
             if not yield_summary.empty:
-                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
+                chart_df = yield_summary[~yield_summary['Time_Group'].astype(str).str.contains("2025 \(Full Year\)", regex=True)]
                 pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
                 if not pivot_d.empty:
                     pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
@@ -556,7 +557,7 @@ if uploaded_file is not None:
         
         cap_summary_rows = []
         for _p in ordered_periods:
-            if _p == "2025 (Full Year)": continue 
+            if "2025 (Full Year)" in str(_p): continue 
             _dfp = df[df['Time_Group'] == _p]
             _dfp_valid = _dfp[_dfp['Valid_Qty'] > 0]
             
@@ -598,7 +599,7 @@ if uploaded_file is not None:
             st.markdown("---")
 
         for period in ordered_periods:
-            if period == "2025 (Full Year)": continue
+            if "2025 (Full Year)" in str(period): continue
             df_p = df[df['Time_Group'] == period]
             if df_p.empty: continue
             
@@ -674,7 +675,6 @@ if uploaded_file is not None:
                 vals_all = plot_df[t4_feat].values
                 cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
                 
-                # Render Badge ON TOP of chart only
                 render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
                 
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
@@ -759,7 +759,7 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
+            df_t5 = df[~df['Time_Group'].astype(str).str.contains("2025 \(Full Year\)", regex=True)].copy()
             
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
@@ -930,6 +930,119 @@ if uploaded_file is not None:
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
+
+    # ==========================================================
+    # TASK 6: CUSTOMER END-USE ANALYSIS
+    # ==========================================================
+    with tab6:
+        st.header("6. Customer End-Use Analysis & Machine Transition")
+        st.info("Analyzing customer rejection rates based on Usage Month to validate the impact of the customer's machine upgrade.")
+        
+        USAGE_COL = '使用月份'
+        COIL_ID_COL = '鋼捲號碼'
+        
+        if USAGE_COL in df.columns and COIL_ID_COL in df.columns:
+            df_t6 = df.copy()
+            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip()
+            
+            st.markdown("### Data Mapping for Defect Calculation")
+            st.caption("Map the columns from your Excel file to calculate the accurate Total Length Diff: Total Input - (Total Output + Total Returned + Total Cut Scrap).")
+            
+            col_map1, col_map2, col_map3, col_map4 = st.columns(4)
+            avail_cols = ['None'] + list(df_t6.columns)
+            
+            in_col = col_map1.selectbox("Total Input Column:", avail_cols, index=avail_cols.index(LEN_COL) if LEN_COL in avail_cols else 0)
+            out_col = col_map2.selectbox("Total Output Column:", avail_cols)
+            ret_col = col_map3.selectbox("Total Returned Column:", avail_cols)
+            scrap_col_t6 = col_map4.selectbox("Total Cut Scrap Column:", avail_cols, index=avail_cols.index(SCRAP_COL) if SCRAP_COL in avail_cols else 0)
+            
+            upgrade_month = st.text_input("Enter the Machine Upgrade Month (e.g., '04' or '2026-04'):", value="04")
+            
+            if in_col != 'None':
+                df_t6['Total_Input'] = pd.to_numeric(df_t6[in_col], errors='coerce').fillna(0)
+                df_t6['Total_Output'] = pd.to_numeric(df_t6[out_col], errors='coerce').fillna(0) if out_col != 'None' else 0
+                df_t6['Total_Returned'] = pd.to_numeric(df_t6[ret_col], errors='coerce').fillna(0) if ret_col != 'None' else 0
+                df_t6['Total_Cut_Scrap'] = pd.to_numeric(df_t6[scrap_col_t6], errors='coerce').fillna(0) if scrap_col_t6 != 'None' else 0
+                
+                # TOTAL LENGTH DIFF CALCULATION (Internal Logic)
+                df_t6['Total_Length_Diff'] = df_t6['Total_Input'] - (df_t6['Total_Output'] + df_t6['Total_Returned'] + df_t6['Total_Cut_Scrap'])
+                
+                df_t6['Customer_Defect_Qty'] = df_t6['Total_Returned'] + df_t6['Total_Length_Diff'] 
+                df_t6['Customer_Defect_Rate (%)'] = np.where(df_t6['Total_Input'] > 0, (df_t6['Customer_Defect_Qty'] / df_t6['Total_Input']) * 100, 0)
+                
+                df_t6 = df_t6[df_t6[USAGE_COL].str.len() >= 4]
+                df_t6 = df_t6.sort_values(USAGE_COL)
+                
+                # --- MACRO VIEW ---
+                st.markdown("---")
+                st.subheader("Macro View: Customer Defect Rate by Usage Month")
+                
+                macro_df = df_t6.groupby(USAGE_COL).agg({'Total_Input': 'sum', 'Customer_Defect_Qty': 'sum'}).reset_index()
+                macro_df['Customer_Defect_Rate (%)'] = np.where(macro_df['Total_Input'] > 0, (macro_df['Customer_Defect_Qty'] / macro_df['Total_Input']) * 100, 0)
+                
+                if not macro_df.empty:
+                    fig_m, ax_m = plt.subplots(figsize=(12, 5))
+                    ax_m.plot(macro_df[USAGE_COL], macro_df['Customer_Defect_Rate (%)'], marker='o', lw=2, color='#d62728')
+                    
+                    if upgrade_month:
+                        april_mask = macro_df[USAGE_COL].str.contains(upgrade_month)
+                        if april_mask.any():
+                            april_idx = macro_df[april_mask].index[0]
+                            ax_m.axvline(x=april_idx, color='blue', linestyle='--', lw=2, label=f'Machine Upgraded ({upgrade_month})')
+                        
+                    ax_m.set_ylabel("Customer Defect Rate (%)")
+                    ax_m.set_title("Defect Rate Trend vs Machine Upgrade Timeline", fontweight='bold')
+                    ax_m.legend()
+                    add_chart_border(ax_m)
+                    plt.xticks(rotation=45)
+                    st.pyplot(fig_m)
+                
+                # --- MICRO VIEW (SPLIT COIL) ---
+                st.markdown("---")
+                st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
+                st.info("Identifying specific coils used in both periods to prove the defect variation is machine-dependent, not material-dependent.")
+                
+                def classify_period(m):
+                    if pd.isna(m): return 'Unknown'
+                    if str(upgrade_month) in str(m) or ('05' in str(m)) or ('06' in str(m)): 
+                        return 'After Upgrade'
+                    return 'Before Upgrade'
+                    
+                df_t6['Machine_Status'] = df_t6[USAGE_COL].apply(classify_period)
+                
+                coils_before = set(df_t6[df_t6['Machine_Status'] == 'Before Upgrade'][COIL_ID_COL])
+                coils_after = set(df_t6[df_t6['Machine_Status'] == 'After Upgrade'][COIL_ID_COL])
+                split_coils = coils_before.intersection(coils_after)
+                
+                if split_coils:
+                    split_df = df_t6[df_t6[COIL_ID_COL].isin(split_coils)]
+                    split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Customer_Defect_Rate (%)', aggfunc='mean')
+                    
+                    if not split_pivot.empty:
+                        fig_s, ax_s = plt.subplots(figsize=(10, 5))
+                        split_pivot.plot(kind='bar', ax=ax_s, color=['#1f77b4', '#ff7f0e'], edgecolor='white')
+                        ax_s.set_ylabel("Defect Rate (%)")
+                        ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
+                        add_chart_border(ax_s)
+                        plt.xticks(rotation=45, ha='right')
+                        st.pyplot(fig_s)
+                else:
+                    st.warning("No split-coils found (coils processed both before and after the upgrade).")
+
+                # --- MATERIAL CONSISTENCY CHECK ---
+                st.markdown("---")
+                st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
+                st.info("Verifying that the 'Theoretical Values' remained constant across the machine upgrade timeline.")
+                
+                prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+                if prop_cols:
+                    mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
+                    st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
+            else:
+                st.warning("Please map the 'Total Input Column' to begin the analysis.")
+                
+        else:
+            st.warning(f"Required columns '{USAGE_COL}' or '{COIL_ID_COL}' not found in the dataset.")
 
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
