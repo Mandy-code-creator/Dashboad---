@@ -102,13 +102,15 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Grades
+    # Grades & Qty Calculations (Fixed KeyError here)
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = [c for c in df.columns if str(c).strip() == g or str(c).strip().startswith(f"{g}.")]
         df[g] = df[match_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if match_cols else 0
 
     df['Total_Qty'] = df[base_grades].sum(axis=1)
+    df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
+    df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
     df['Valid_Qty'] = df[['A-B+', 'A-B']].sum(axis=1)
 
     df_global = df.copy()
@@ -223,7 +225,7 @@ if uploaded_file is not None:
                 ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.5, label='Data')
                 ax1.axhline(mean_v, color='green', ls='--'); ax1.axhline(ucl_i, color='red', ls='--'); ax1.axhline(lcl_i, color='red', ls='--')
                 
-                # Tô đỏ điểm vi phạm
+                # Highlight logic
                 out_control = np.where((vals > ucl_i) | (vals < lcl_i))[0]
                 if len(out_control) > 0:
                     ax1.scatter(out_control, vals[out_control], color='red', s=80, zorder=5, label='Out of Control (SPC)')
@@ -283,9 +285,8 @@ if uploaded_file is not None:
             df_t6['Parsed_Date'] = safe_parse_usage_date(df_t6[USAGE_COL])
             df_t6 = df_t6.dropna(subset=['Parsed_Date'])
             
-            # Phân tách mốc thời gian T4/2026 cực kỳ chính xác
             cutoff_date = pd.to_datetime('2026-04-01')
-            df_t6['Display_Month'] = df_t6['Parsed_Date'].dt.strftime('%Y-%m') # Format hiển thị chart đẹp
+            df_t6['Display_Month'] = df_t6['Parsed_Date'].dt.strftime('%Y-%m')
             df_t6['Machine_Status'] = df_t6['Parsed_Date'].apply(lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)')
 
             st.subheader("Macro View: Customer Scrap Rate by Usage Month")
@@ -314,7 +315,6 @@ if uploaded_file is not None:
                     b_val = df_c[df_c['Machine_Status'] == 'Old Machine (< Apr 2026)']['Scrap_Rate'].values[0]
                     a_val = df_c[df_c['Machine_Status'] == 'New Machine (>= Apr 2026)']['Scrap_Rate'].values[0]
                     
-                    # 🚀 STRICT FILTER: Bỏ qua cuộn 0% ở cả 2 bên để tránh làm rác bảng chẩn đoán
                     if b_val == 0 and a_val == 0:
                         continue
                     
@@ -342,7 +342,7 @@ if uploaded_file is not None:
                         use_container_width=True, hide_index=True
                     )
                 else:
-                    st.success("Tất cả các cuộn thép cắt qua 2 máy đều đạt chất lượng hoàn hảo (Hao hụt 0%). Không có cuộn lỗi để hiển thị.")
+                    st.success("All coils processed across both machines achieved perfect quality (0% scrap). No defective coils to display.")
             else:
                 st.warning("No split-coils found across the April 2026 transition line.")
         else:
