@@ -346,11 +346,11 @@ if uploaded_file is not None:
             lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
             y_top = y_lim * 0.98
             if lsl is not None:
-                ax.axvline(lsl, color='red', lw=2, ls='-', zorder=3)
-                ax.text(lsl, y_top, f' LSL\n {lsl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='left')
+                ax.axvline(lsl, color='darkred', lw=2, ls='-', zorder=3)
+                ax.text(lsl, y_top, f' LSL\n {lsl}', color='darkred', fontsize=7.5, fontweight='bold', va='top', ha='left')
             if usl is not None:
-                ax.axvline(usl, color='red', lw=2, ls='-', zorder=3)
-                ax.text(usl, y_top, f' USL\n {usl}', color='red', fontsize=7.5, fontweight='bold', va='top', ha='right')
+                ax.axvline(usl, color='darkred', lw=2, ls='-', zorder=3)
+                ax.text(usl, y_top, f' USL\n {usl}', color='darkred', fontsize=7.5, fontweight='bold', va='top', ha='right')
             if tgt is not None:
                 ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
                 ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
@@ -662,9 +662,8 @@ if uploaded_file is not None:
                 st.markdown("---")
                 st.subheader(f"Feature: {t4_feat}")
                 
-                # Render the Cpk/Cp/Ca Badge directly above the chart (Valid because 2026 Onwards is within control period)
                 vals_all = plot_df[t4_feat].values
-                cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick) # Using a valid post-Q4 label
+                cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
                 render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
                 
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
@@ -682,17 +681,39 @@ if uploaded_file is not None:
                 
                 # I-Chart
                 ax_i.plot(vals, marker='o', color='#1f77b4', linestyle='-', linewidth=1.5, markersize=5)
+                
+                # Statistical Control Limits
                 ax_i.axhline(mean_v, color='green', linestyle='--', label=f'Mean: {mean_v:.2f}')
                 ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
                 ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
                 
+                # User Input Specification Limits (USL/LSL/Target)
+                spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {}) if t4_thick != 'Overall' else {}
+                lsl = spec.get('min')
+                usl = spec.get('max')
+                tgt = spec.get('target')
+
+                if lsl is not None:
+                    ax_i.axhline(lsl, color='darkred', linestyle='-', linewidth=2, label=f'LSL (Spec Min): {lsl}')
+                if usl is not None:
+                    ax_i.axhline(usl, color='darkred', linestyle='-', linewidth=2, label=f'USL (Spec Max): {usl}')
+                if tgt is not None:
+                    ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
+                
                 out_i = np.where((vals > ucl_i) | (vals < lcl_i))[0]
                 if len(out_i) > 0:
-                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50)
+                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50, label="Out of Control")
                     
+                # Adjust Y-axis to comfortably fit all lines
+                all_y_vals = [v for v in [np.max(vals), np.min(vals), ucl_i, lcl_i, usl, lsl] if v is not None]
+                y_max = max(all_y_vals) if all_y_vals else 10
+                y_min = min(all_y_vals) if all_y_vals else 0
+                y_pad = (y_max - y_min) * 0.3 if (y_max - y_min) != 0 else 1
+                ax_i.set_ylim(y_min - y_pad*0.5, y_max + y_pad*1.5)
+                
                 ax_i.set_title(f"Individual (I) Chart - {t4_feat} ({t4_thick}mm)", fontweight='bold')
                 ax_i.set_ylabel("Value")
-                ax_i.legend(loc='upper right')
+                ax_i.legend(loc='upper right', ncol=2, fontsize=8)
                 add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
                 
