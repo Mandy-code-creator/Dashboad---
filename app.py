@@ -146,7 +146,7 @@ if uploaded_file is not None:
             spine.set_linewidth(1.0)
 
     # ==========================================================
-    # GLOBAL SPC CAPABILITY FUNCTIONS (Khôi phục toàn diện)
+    # GLOBAL SPC CAPABILITY FUNCTIONS
     # ==========================================================
     def is_valid_for_control(period_label):
         if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
@@ -305,12 +305,11 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
     # ==========================================================
-    # TASK 4: I-MR TRACKING (KHÔI PHỤC HOÀN TOÀN CÁC THÔNG SỐ)
+    # TASK 4: I-MR TRACKING (VÁ LỖI LABEL OVERLAP)
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
         
-        # 🚀 SỬA LỖI MỐC THỜI GIAN: Bắt đầu từ Quý 4 năm 2025 (Tháng 10/2025 trở đi)
         df_t4 = df[df['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
         
@@ -323,7 +322,6 @@ if uploaded_file is not None:
             for t4_feat in ['YS', 'TS', 'EL', 'YPE']:
                 if t4_feat not in plot_df_base.columns: continue
                 
-                # Sắp xếp và dọn dẹp dữ liệu để trục X không bị sai
                 plot_df = plot_df_base.sort_values('Production_Date').dropna(subset=[t4_feat]).reset_index(drop=True)
                 if len(plot_df) < 2: continue
                     
@@ -333,33 +331,33 @@ if uploaded_file is not None:
                 vals = plot_df[t4_feat].values
                 dates = plot_df['Production_Date'].dt.strftime('%m/%d')
                 
-                # 🚀 HIỂN THỊ LẠI BẢNG SPC CỦA GIAI ĐOẠN CẢI THIỆN
                 cap_data = calc_capability(vals, t4_feat, 'Q4 2025 Onwards', t4_thick)
                 render_capability_badge(cap_data, t4_feat, 'Q4 2025 Onwards', t4_thick)
                 
-                # Tính toán giới hạn
                 mean_v = np.mean(vals); mr = np.abs(np.diff(vals)); mr_mean = np.mean(mr)
                 ucl_i = mean_v + 2.66 * mr_mean; lcl_i = max(0, mean_v - 2.66 * mr_mean)
                 
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 9), gridspec_kw={'height_ratios': [2, 1]})
                 
-                # --- I-Chart ---
                 ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.6, label='Actual Data')
                 
-                x_max = len(vals) - 1
-                ax1.set_xlim(-len(vals)*0.05, len(vals)*1.15) # Mở rộng lề phải để in text
+                # 🚀 BBOX STYLE: Tạo hộp nền trắng mờ chống đè lên vạch
+                bbox_props = dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none")
                 
-                # Vẽ và in text Mean, UCL, LCL
+                # Mở rộng trục X sang 2 bên để có không gian ghi Text
+                x_max = len(vals)
+                ax1.set_xlim(-1, x_max + 1) 
+                
+                # Plot Lines & Labels cho SPC
                 ax1.axhline(mean_v, color='green', ls='--')
-                ax1.text(x_max, mean_v, f'  Mean: {mean_v:.1f}', color='green', va='center', fontweight='bold', fontsize=9)
+                ax1.text(x_max, mean_v, f' Mean: {mean_v:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 ax1.axhline(ucl_i, color='red', ls='--')
-                ax1.text(x_max, ucl_i, f'  UCL: {ucl_i:.1f}', color='red', va='bottom', fontweight='bold', fontsize=9)
+                ax1.text(x_max, ucl_i, f' UCL: {ucl_i:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 ax1.axhline(lcl_i, color='red', ls='--')
-                ax1.text(x_max, lcl_i, f'  LCL: {lcl_i:.1f}', color='red', va='top', fontweight='bold', fontsize=9)
+                ax1.text(x_max, lcl_i, f' LCL: {lcl_i:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
-                # Tô đỏ điểm vi phạm
                 out_control = np.where((vals > ucl_i) | (vals < lcl_i))[0]
                 if len(out_control) > 0:
                     ax1.scatter(out_control, vals[out_control], color='red', s=90, zorder=5, label='Out of Control (SPC)')
@@ -369,35 +367,36 @@ if uploaded_file is not None:
                 usl, lsl = spec.get('max'), spec.get('min')
                 if usl is not None: 
                     ax1.axhline(usl, color='darkred', lw=2)
-                    ax1.text(0, usl, f'USL: {usl}  ', color='darkred', va='center', ha='right', fontweight='bold', fontsize=9)
+                    ax1.text(-0.8, usl, f'USL: {usl} ', color='darkred', va='center', ha='left', fontweight='bold', fontsize=9, bbox=bbox_props)
                     out_usl = np.where(vals > usl)[0]
                     ax1.scatter(out_usl, vals[out_usl], marker='x', color='darkred', s=120, lw=2, zorder=6, label='Out of Spec (USL)')
                 if lsl is not None: 
                     ax1.axhline(lsl, color='darkred', lw=2)
-                    ax1.text(0, lsl, f'LSL: {lsl}  ', color='darkred', va='center', ha='right', fontweight='bold', fontsize=9)
+                    ax1.text(-0.8, lsl, f'LSL: {lsl} ', color='darkred', va='center', ha='left', fontweight='bold', fontsize=9, bbox=bbox_props)
                     out_lsl = np.where(vals < lsl)[0]
                     ax1.scatter(out_lsl, vals[out_lsl], marker='x', color='darkred', s=120, lw=2, zorder=6, label='Out of Spec (LSL)')
 
                 ax1.set_title(f"Individual (I) Chart - {t4_feat}", fontsize=11, fontweight='bold')
-                ax1.legend(loc='upper right', fontsize=8)
                 
-                # Trục X hiển thị ngày tháng
+                # Legend ra ngoài biểu đồ để không che data
+                ax1.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
+                
                 step = max(1, len(vals) // 25)
                 ax1.set_xticks(range(0, len(vals), step))
                 ax1.set_xticklabels(dates.iloc[::step], rotation=30, ha='right', fontsize=8)
                 add_chart_border(ax1)
                 
-                # --- MR-Chart ---
+                # MR-Chart
                 ax2.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', alpha=0.6)
                 ax2.axhline(mr_mean, color='green', ls='--')
-                ax2.text(len(mr)-1, mr_mean, f'  Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9)
+                ax2.text(len(mr), mr_mean, f' Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 ucl_mr = 3.267 * mr_mean
                 ax2.axhline(ucl_mr, color='red', ls='--')
-                ax2.text(len(mr)-1, ucl_mr, f'  UCL MR: {ucl_mr:.1f}', color='red', va='bottom', fontweight='bold', fontsize=9)
+                ax2.text(len(mr), ucl_mr, f' UCL MR: {ucl_mr:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 ax2.set_title("Moving Range (MR) Chart", fontsize=10, fontweight='bold')
-                ax2.set_xlim(-len(vals)*0.05, len(vals)*1.15)
+                ax2.set_xlim(-1, x_max + 1)
                 ax2.set_xticks(range(0, len(vals)-1, step))
                 ax2.set_xticklabels(dates.iloc[1::step], rotation=30, ha='right', fontsize=8)
                 add_chart_border(ax2)
@@ -405,17 +404,115 @@ if uploaded_file is not None:
                 fig.tight_layout()
                 st.pyplot(fig)
 
+    # ==========================================================
+    # TASK 5: TAIL SCRAP (KHÔI PHỤC TOÀN BỘ CÁC BIỂU ĐỒ)
+    # ==========================================================
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         COIL_ID_COL = '鋼捲號碼'
+
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
             df_t5 = df[~df['Time_Group'].astype(str).str.contains("2025 \(Full Year\)", regex=True)].copy()
+            df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
+            
+            missing_mask = df_t5[COIL_ID_COL].isna()
+            if missing_mask.any(): df_t5.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df_t5[missing_mask].index]
+
             scrap_totals = df_t5.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
             first_occ = df_t5.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             df_m = first_occ[['Time_Group', COIL_ID_COL, LEN_COL, 'Actual_Thickness', 'HR_Material']].merge(scrap_totals, on=[COIL_ID_COL, 'Time_Group'])
+
+            # --- 1. HYBRID TREND LINE ---
+            st.subheader("Rejection Rate Trend (%)")
+            trend_data = df_m.groupby('Time_Group').agg(Input_Length=(LEN_COL, 'sum'), Total_Scrap=(SCRAP_COL, 'sum')).reset_index()
+            trend_data = trend_data[trend_data['Time_Group'] != 'Unknown']
+            trend_data['Rejection_Rate (%)'] = np.where(trend_data['Input_Length'] > 0, (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100), 0).round(2)
+            trend_data['_sort'] = trend_data['Time_Group'].apply(get_sort_key)
+            trend_data = trend_data.sort_values('_sort').drop(columns=['_sort'])
+
+            fig_trend, ax_trend = plt.subplots(figsize=(14, 5))
+            if not trend_data.empty:
+                ax_trend.plot(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], marker='o', markersize=8, markeredgecolor='white', markeredgewidth=1.5, linestyle='-', color='#1f77b4', linewidth=3, label='Rejection Rate %')
+                ax_trend.fill_between(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], color='#1f77b4', alpha=0.1)
+                ax_trend.set_ylim(0, trend_data['Rejection_Rate (%)'].max() * 1.35 + 0.5)
+                ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
+                ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
+                ax_trend.grid(axis='y', linestyle='--', alpha=0.5)
+                
+                for i, val in enumerate(trend_data['Rejection_Rate (%)']):
+                    ax_trend.annotate(f'{val:.2f}%', xy=(i, val), xytext=(0, 8), textcoords="offset points", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#222', bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
+                
+                add_chart_border(ax_trend)
+                plt.xticks(rotation=40, ha='right', fontsize=10)
+                fig_trend.tight_layout()
+            st.pyplot(fig_trend)
+
+            # --- 2. PERIOD SUMMARY CHART ---
+            st.markdown("---")
+            st.subheader("Scrap Rate by Time Period")
             scrap_p = df_m.groupby('Time_Group').agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
-            scrap_p['Scrap_Rate (%)'] = (scrap_p[SCRAP_COL] / scrap_p[LEN_COL] * 100).round(2)
-            st.dataframe(scrap_p.sort_values('Time_Group'), use_container_width=True)
+            scrap_p['Scrap_Rate (%)'] = np.where(scrap_p[LEN_COL] > 0, (scrap_p[SCRAP_COL] / scrap_p[LEN_COL] * 100), 0).round(2)
+            scrap_p['_sort'] = scrap_p['Time_Group'].apply(get_sort_key)
+            scrap_p = scrap_p.sort_values('_sort').drop(columns=['_sort'])
+            
+            fig_p, ax_p = plt.subplots(figsize=(10, 4))
+            if not scrap_p.empty:
+                ax_p.bar(scrap_p['Time_Group'], scrap_p['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
+                ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
+                ax_p.set_ylabel("Scrap Rate (%)")
+                ax_p.set_ylim(0, scrap_p['Scrap_Rate (%)'].max() * 1.2 + 0.1)
+                for i, val in enumerate(scrap_p['Scrap_Rate (%)']):
+                    ax_p.annotate(f"{val:.2f}%", xy=(i, val), xytext=(0, 5), textcoords="offset points", ha='center', va='bottom', fontweight='bold')
+                add_chart_border(ax_p)
+                plt.xticks(rotation=30, ha='right')
+                fig_p.tight_layout()
+            st.pyplot(fig_p)
+            
+            st.dataframe(scrap_p.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds').format({LEN_COL: '{:,.2f}', SCRAP_COL: '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}), use_container_width=True, hide_index=True)
+
+            # --- 3. LEVEL-BY-LEVEL DRILL DOWN ---
+            st.markdown("---")
+            st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
+            scrap_detail = df_m.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
+            scrap_detail = scrap_detail[scrap_detail[LEN_COL] > 0]
+            scrap_detail['Scrap_Rate (%)'] = (scrap_detail[SCRAP_COL] / scrap_detail[LEN_COL] * 100).round(2)
+            
+            col_t, col_m_chart = st.columns(2)
+            with col_t:
+                st.markdown("**Scrap Rate by Period & Thickness**")
+                fig_t, ax_t = plt.subplots(figsize=(8, 4))
+                if not scrap_detail.empty:
+                    pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
+                    if not pivot_t.empty:
+                        pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
+                        ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        for c in ax_t.containers:
+                            ax_t.bar_label(c, labels=[f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c], padding=3, fontsize=7, fontweight='bold', rotation=90)
+                    ax_t.set_ylim(0, pivot_t.max().max() * 1.4 + 2 if not pivot_t.isna().all().all() else 10)
+                add_chart_border(ax_t)
+                plt.xticks(rotation=30, ha='right')
+                fig_t.tight_layout()
+                st.pyplot(fig_t)
+
+            with col_m_chart:
+                st.markdown("**Scrap Rate by Period & Material**")
+                fig_m_ch, ax_m_ch = plt.subplots(figsize=(8, 4))
+                if not scrap_detail.empty:
+                    pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
+                    if not pivot_m.empty:
+                        pivot_m.plot(kind='bar', ax=ax_m_ch, colormap='tab10', edgecolor='white')
+                        ax_m_ch.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        for c in ax_m_ch.containers:
+                            ax_m_ch.bar_label(c, labels=[f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c], padding=3, fontsize=7, fontweight='bold', rotation=90)
+                    ax_m_ch.set_ylim(0, pivot_m.max().max() * 1.4 + 2 if not pivot_m.isna().all().all() else 10)
+                add_chart_border(ax_m_ch)
+                plt.xticks(rotation=30, ha='right')
+                fig_m_ch.tight_layout()
+                st.pyplot(fig_m_ch)
+                
+            scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
+            scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
+            st.dataframe(scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges').format({'Actual_Thickness': '{:.2f}', LEN_COL: '{:,.2f}', SCRAP_COL: '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}), use_container_width=True, hide_index=True)
 
     # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS
