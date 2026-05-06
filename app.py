@@ -576,12 +576,10 @@ if uploaded_file is not None:
                 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
-            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC (NÂNG CẤP THÀNH BIỂU ĐỒ NHIỆT - HEATMAP)
             st.markdown("---")
             st.subheader("🔍 Inventory Traceability (Production Origin of Used Coils)")
             st.info("Visual matrix showing when the scrapped coils were originally produced. Filtered from Q4 2025 onwards.")
             
-            # LỌC TỪ Q4 2025 TRỞ ĐI ĐỂ GỌN BẢNG THEO YÊU CẦU
             df_trace_base = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
             
             if not df_trace_base.empty:
@@ -591,27 +589,24 @@ if uploaded_file is not None:
                 ).reset_index()
                 trace_df['Scrap_Rate (%)'] = np.where(trace_df['Total_Length'] > 0, (trace_df['Total_Scrap'] / trace_df['Total_Length']) * 100, 0).round(2)
                 
-                # Tạo Pivot Table cho Heatmap
                 pivot_trace = trace_df.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
                 
                 st.markdown("**Scrap Rate (%) Heatmap by Usage vs. Production Month (Q4/2025 Onwards)**")
                 
-                # Vẽ Biểu đồ nhiệt Seaborn
                 fig_heat, ax_heat = plt.subplots(figsize=(10, max(4, len(pivot_trace) * 0.6)))
                 sns.heatmap(pivot_trace, annot=True, fmt=".1f", cmap="Reds", 
                             linewidths=1, linecolor='white', 
                             cbar_kws={'label': 'Scrap Rate (%)'}, ax=ax_heat,
                             annot_kws={"size": 10, "weight": "bold"})
                 
-                ax_heat.set_ylabel("Usage Month (Tháng khách xài)", fontweight='bold')
-                ax_heat.set_xlabel("Production Period (Tháng SX)", fontweight='bold')
+                ax_heat.set_ylabel("Usage Month", fontweight='bold')
+                ax_heat.set_xlabel("Production Period", fontweight='bold')
                 ax_heat.set_title("Traceability Matrix (Post-Improvement)", fontweight='bold', pad=15)
                 plt.xticks(rotation=45, ha='right')
                 fig_heat.tight_layout()
                 st.pyplot(fig_heat)
                 
-                # Giấu bảng thô đi
-                with st.expander("📂 View Detailed Traceability Data (Dành cho QC kéo xem chi tiết)"):
+                with st.expander("📂 View Detailed Traceability Data"):
                     trace_detailed = trace_df.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
                     st.dataframe(
                         trace_detailed.style.format({
