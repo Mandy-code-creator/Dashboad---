@@ -6,6 +6,7 @@ import numpy as np
 import io
 import seaborn as sns
 import re
+import datetime
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
@@ -937,27 +938,43 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer scrap rates based on Usage Month. AI automatically filters split-coils to isolate machine impact from material quality.")
+        st.info("Analyzing customer scrap rates based on Usage Date. AI automatically parses full dates and filters split-coils to isolate machine impact from material quality.")
         
-        USAGE_COL = '使用月份'
+        # SMART COLUMN DETECTION FOR USAGE DATE
+        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
+        USAGE_COL = next((c for c in possible_usage_cols if c in df_global.columns), None)
+        
         COIL_ID_COL = '鋼捲號碼'
         
-        if USAGE_COL in df.columns and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df_t6 = df.copy()
-            df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip().replace(['nan', 'None', ''], np.nan)
-            df_t6 = df_t6.dropna(subset=[USAGE_COL])
+        if USAGE_COL and COIL_ID_COL in df_global.columns and LEN_COL in df_global.columns and SCRAP_COL in df_global.columns:
+            df_t6 = df_global.copy()
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
+            df_t6 = df_t6.dropna(subset=[USAGE_COL, COIL_ID_COL])
             
-            # --- 1. SMART MONTH PARSING & SORTING ---
-            def extract_month_num(m_str):
-                nums = re.findall(r'\d+', str(m_str))
-                if nums:
-                    val = int(nums[-1])
-                    if val > 100: 
-                        val = int(str(val)[-2:])
-                    return val
-                return 99 
+            # --- 1. SMART DATE PARSING ---
+            def extract_month_num(m_val):
+                if pd.isna(m_val): return 99
+                # If it's already a native Date/Datetime object from Excel
+                if isinstance(m_val, (pd.Timestamp, np.datetime64, datetime.date)):
+                    return m_val.month
                 
+                m_str = str(m_val).strip()
+                try:
+                    dt = pd.to_datetime(m_str)
+                    return dt.month
+                except:
+                    # Regex fallback for YYYY/MM/DD or YYYY-MM-DD
+                    match = re.search(r'\d{4}[-/](\d{1,2})', m_str)
+                    if match: return int(match.group(1))
+                    
+                    # Regex fallback for '4月' or purely numbers
+                    nums = re.findall(r'\d+', m_str)
+                    if nums:
+                        val = int(nums[-1])
+                        if val > 12: val = int(str(val)[-2:])
+                        return val
+                    return 99 
+                    
             df_t6['Month_Num'] = df_t6[USAGE_COL].apply(extract_month_num)
             df_t6 = df_t6[df_t6['Month_Num'] <= 12] 
             df_t6 = df_t6.sort_values('Month_Num')
@@ -1071,7 +1088,7 @@ if uploaded_file is not None:
                 mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
                 st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
         else:
-            st.warning(f"Required columns '{USAGE_COL}', '{COIL_ID_COL}', '{LEN_COL}', or '{SCRAP_COL}' not found in the dataset.")
+            st.warning(f"Required column '{USAGE_COL}' or related calculation columns not found in the dataset.")
 
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
