@@ -5,7 +5,6 @@ from matplotlib.patches import Patch
 import numpy as np
 import io
 import seaborn as sns
-import re
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
@@ -937,7 +936,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer scrap rates based on Usage Month. AI automatically filters split-coils to isolate machine impact from material quality.")
+        st.info("Analyzing customer scrap rates based on Usage Month using Task 5 logic to validate the impact of the customer's machine upgrade.")
         
         USAGE_COL = '使用月份'
         COIL_ID_COL = '鋼捲號碼'
@@ -946,27 +945,13 @@ if uploaded_file is not None:
             df_t6 = df.copy()
             df_t6[USAGE_COL] = df_t6[USAGE_COL].astype(str).str.strip().replace(['nan', 'None', ''], np.nan)
             df_t6 = df_t6.dropna(subset=[USAGE_COL])
+            
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
-            # --- 1. SMART MONTH PARSING & SORTING ---
-            def extract_month_num(m_str):
-                nums = re.findall(r'\d+', str(m_str))
-                if nums:
-                    val = int(nums[-1])
-                    if val > 100: 
-                        val = int(str(val)[-2:])
-                    return val
-                return 99 
-                
-            df_t6['Month_Num'] = df_t6[USAGE_COL].apply(extract_month_num)
-            df_t6 = df_t6[df_t6['Month_Num'] <= 12] 
-            df_t6 = df_t6.sort_values('Month_Num')
-            df_t6['Display_Month'] = df_t6['Month_Num'].apply(lambda x: f"Month {x}")
-            
-            # --- MACRO VIEW ---
+            # --- 1. MACRO VIEW ---
             st.subheader("Macro View: Customer Scrap Rate by Usage Month")
             
-            macro_df = df_t6.groupby('Display_Month', sort=False).agg(
+            macro_df = df_t6.groupby(USAGE_COL).agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum')
             ).reset_index()
@@ -977,21 +962,43 @@ if uploaded_file is not None:
                 0
             ).round(2)
             
-            if not macro_df.empty:
-                chart_data = macro_df.set_index('Display_Month')[['Customer_Scrap_Rate (%)']]
-                st.line_chart(chart_data, color="#d62728")
+            macro_df = macro_df.sort_values(USAGE_COL)
             
-            # --- MICRO VIEW (SPLIT COIL) ---
+            if not macro_df.empty:
+                fig_m, ax_m = plt.subplots(figsize=(12, 5))
+                ax_m.plot(macro_df[USAGE_COL], macro_df['Customer_Scrap_Rate (%)'], marker='o', lw=2, color='#d62728')
+                
+                # Highlight Machine Upgrade in April (04)
+                april_mask = macro_df[USAGE_COL].str.contains('04|4')
+                if april_mask.any():
+                    april_idx = macro_df[april_mask].index[0]
+                    ax_m.axvline(x=april_idx, color='blue', linestyle='--', lw=2, label='Machine Upgraded (April)')
+                    
+                ax_m.set_ylabel("Customer Scrap Rate (%)")
+                ax_m.set_title("Scrap Rate Trend vs Machine Upgrade Timeline", fontweight='bold')
+                ax_m.legend()
+                add_chart_border(ax_m)
+                plt.xticks(rotation=45)
+                st.pyplot(fig_m)
+            
+            # --- 2. MICRO VIEW (SPLIT COIL) ---
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
+            st.info("Identifying specific coils used in both periods to prove the scrap variation is machine-dependent, not material-dependent.")
             
-            def classify_period(m_num):
-                if m_num >= 4:
-                    return 'After Upgrade (>= April)'
-                else:
+            def classify_period(m):
+                try:
+                    val = int(''.join(filter(str.isdigit, str(m))))
+                    if val >= 4:
+                        return 'After Upgrade (>= April)'
+                    else:
+                        return 'Before Upgrade (< April)'
+                except:
+                    if '04' in str(m) or '05' in str(m) or '06' in str(m):
+                         return 'After Upgrade (>= April)'
                     return 'Before Upgrade (< April)'
                     
-            df_t6['Machine_Status'] = df_t6['Month_Num'].apply(classify_period)
+            df_t6['Machine_Status'] = df_t6[USAGE_COL].apply(classify_period)
             
             coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg(
                 Total_Length=(LEN_COL, 'sum'),
@@ -1009,62 +1016,24 @@ if uploaded_file is not None:
             split_coils = coils_before.intersection(coils_after)
             
             if split_coils:
-                st.markdown("#### 🔍 AI Split-Coil Diagnosis")
-                st.info("Tracking the exact same coils run on both the old and new machines to assign the root cause.")
-                
-                split_data = []
-                for coil in split_coils:
-                    df_c = coil_status_scrap[coil_status_scrap[COIL_ID_COL] == coil]
-                    before_val = df_c[df_c['Machine_Status'] == 'Before Upgrade (< April)']['Scrap_Rate'].values
-                    after_val = df_c[df_c['Machine_Status'] == 'After Upgrade (>= April)']['Scrap_Rate'].values
-                    
-                    b_val = before_val[0] if len(before_val) > 0 else 0
-                    a_val = after_val[0] if len(after_val) > 0 else 0
-                    
-                    props = df_t6[df_t6[COIL_ID_COL] == coil][['YS', 'TS', 'EL']].mean().to_dict()
-                    
-                    if b_val > 10 and a_val < 5:
-                        judgment = "🚨 Old Machine Issue (Proven)"
-                    elif b_val > 10 and a_val >= 5:
-                        judgment = "⚠️ Material / Process Issue"
-                    elif a_val > b_val + 5:
-                        judgment = "⚙️ New Machine Tuning Issue"
-                    else:
-                        judgment = "✅ Normal / Stable"
-                        
-                    split_data.append({
-                        'Coil ID': coil,
-                        'Scrap (Old Machine)': b_val,
-                        'Scrap (New Machine)': a_val,
-                        'Delta (%)': b_val - a_val,
-                        'AI Root Cause': judgment,
-                        'Theoretical YS': props.get('YS', np.nan),
-                        'Theoretical TS': props.get('TS', np.nan),
-                        'Theoretical EL': props.get('EL', np.nan)
-                    })
-                    
-                split_report = pd.DataFrame(split_data)
-                
-                st.dataframe(
-                    split_report.style.format({
-                        'Scrap (Old Machine)': '{:.2f}%',
-                        'Scrap (New Machine)': '{:.2f}%',
-                        'Delta (%)': '{:.2f}%',
-                        'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'
-                    }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
-                    use_container_width=True, hide_index=True
-                )
-                
                 split_df = coil_status_scrap[coil_status_scrap[COIL_ID_COL].isin(split_coils)]
                 split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate', aggfunc='mean')
-                st.bar_chart(split_pivot, color=["#ff7f0e", "#1f77b4"])
                 
+                if not split_pivot.empty:
+                    fig_s, ax_s = plt.subplots(figsize=(10, 5))
+                    split_pivot.plot(kind='bar', ax=ax_s, color=['#ff7f0e', '#1f77b4'], edgecolor='white')
+                    ax_s.set_ylabel("Scrap Rate (%)")
+                    ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
+                    add_chart_border(ax_s)
+                    plt.xticks(rotation=45, ha='right')
+                    st.pyplot(fig_s)
             else:
-                st.warning("No split-coils found (No single coil was processed on both the Old and New machines).")
+                st.warning("No split-coils found (coils processed both before and after the upgrade).")
 
             # --- MATERIAL CONSISTENCY CHECK ---
             st.markdown("---")
             st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
+            st.info("Verifying that the Theoretical Values remained constant across the machine upgrade timeline.")
             
             prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
             if prop_cols:
@@ -1089,8 +1058,6 @@ if uploaded_file is not None:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
-            if 'split_report' in locals() and not split_report.empty:
-                split_report.to_excel(writer, sheet_name='Split_Coil_AI_Diagnosis', index=False)
         
         st.sidebar.download_button(
             label="📥 Download Full Excel",
