@@ -50,7 +50,7 @@ if uploaded_file is not None:
     }
     df.rename(columns=rename_dict, inplace=True)
     
-    # XÓA CÁC CỘT TRÙNG LẶP (FIX LỖI TYPEERROR TẠI ĐÂY)
+    # Fix Duplicated Columns
     df = df.loc[:, ~df.columns.duplicated()]
     
     if 'Actual_Thickness' not in df.columns:
@@ -59,7 +59,6 @@ if uploaded_file is not None:
                 df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
                 break
                 
-    # Chốt chặn xóa trùng lặp lần 2 để an toàn tuyệt đối
     df = df.loc[:, ~df.columns.duplicated()]
                 
     if '熱軋材質' in df.columns:
@@ -960,29 +959,35 @@ if uploaded_file is not None:
         
         if USAGE_COL and COIL_ID_COL in df_global.columns and LEN_COL in df_global.columns and SCRAP_COL in df_global.columns:
             df_t6 = df_global.copy()
+            
+            # 🚀 CHỐT CHẶN TRIỆT TIÊU BÓNG MA DỮ LIỆU: Bỏ ngay các dòng không có chiều dài
+            df_t6 = df_t6[df_t6[LEN_COL] > 0]
+            
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             df_t6 = df_t6.dropna(subset=[USAGE_COL, COIL_ID_COL])
             
-            # --- 1. SMART DATE PARSING ---
+            # --- 1. SMART DATE PARSING CHUẨN CHÂU Á ---
             def extract_month_num(m_val):
                 if pd.isna(m_val): return 99
-                # Nếu là định dạng thời gian chuẩn của Excel/Pandas
                 if isinstance(m_val, (pd.Timestamp, np.datetime64, datetime.date)):
                     return m_val.month
                 
                 m_str = str(m_val).strip()
+                
+                # Bắt dính YYYYMMDD hoặc YYYY/MM/DD ưu tiên trước
+                match_ymd = re.search(r'(20\d{2})[-/]?(\d{1,2})[-/]?(\d{1,2})', m_str)
+                if match_ymd:
+                    return int(match_ymd.group(2))
+                    
                 try:
-                    dt = pd.to_datetime(m_str)
+                    # Ép Python phải đọc ngày trước tháng sau (Chuẩn Taiwan/VN)
+                    dt = pd.to_datetime(m_str, dayfirst=True)
                     return dt.month
                 except:
-                    # Bắt định dạng dạng ngày tháng như YYYY/MM/DD
-                    match = re.search(r'\d{4}[-/](\d{1,2})', m_str)
-                    if match: return int(match.group(1))
-                    
-                    # Bắt chữ chứa số (ví dụ: '4月')
+                    # Bắt chữ chứa số cuối cùng
                     nums = re.findall(r'\d+', m_str)
                     if nums:
-                        val = int(nums[-1])
+                        val = int(nums[0]) if len(nums)==1 else int(nums[-1])
                         if val > 12: val = int(str(val)[-2:])
                         return val
                     return 99 
