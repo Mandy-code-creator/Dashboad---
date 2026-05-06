@@ -98,16 +98,21 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
+    # ROBUST QUALITY GRADE MAPPING (Ignores hidden spaces in Excel headers)
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
-        match_cols = [c for c in df.columns if c == g or c == f"{g}個數" or str(c).startswith(f"{g}.")]
+        g_clean = g.replace(" ", "")
+        match_cols = []
+        for c in df.columns:
+            c_clean = str(c).strip().replace(" ", "")
+            if c_clean == g_clean or c_clean == f"{g_clean}個數" or c_clean.startswith(f"{g_clean}."):
+                match_cols.append(c)
         df[g] = df[match_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1) if match_cols else 0
 
     df['Total_Qty'] = df[base_grades].sum(axis=1)
     df['Severe_Bad_Qty'] = df[['B+', 'B']].sum(axis=1)
     df['Acceptable_Qty'] = df['Total_Qty'] - df['Severe_Bad_Qty']
 
-    # STRICT FILTER FOR LIMIT CALCULATIONS: Only quality levels A or B
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
@@ -214,7 +219,6 @@ if uploaded_file is not None:
         if cpk >= 1.00: return '⚠️ Marginal'
         return '❌ Not Capable'
 
-    # KHÔI PHỤC LẠI HÀM VẼ BADGE BỊ THIẾU
     def render_capability_badge(cap, feat, period_label, thickness):
         if cap is None: return
         
@@ -430,6 +434,7 @@ if uploaded_file is not None:
 
         st.markdown("---")
         st.subheader("📊 Grade Distribution by Time Period (%)")
+        st.caption("Note: Percentages represent only the target thickness groups (0.5mm, 0.6mm, 0.8mm).")
         
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
@@ -604,14 +609,14 @@ if uploaded_file is not None:
             cols = st.columns(2)
             for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
                 with cols[idx % 2]:
+                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
+                    vals_all = df_p_valid[f].dropna().values
+                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
+                    
                     fig, ax = plt.subplots(figsize=(8, 4.5))
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
-                    
-                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
-                    vals_all = df_p_valid[f].dropna().values
-                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -623,14 +628,14 @@ if uploaded_file is not None:
                 
                 for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_t.columns]):
                     with tcols[idx % 2]:
+                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
+                        vals_t = df_t_valid[f].dropna().values
+                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
+                        
                         fig, ax = plt.subplots(figsize=(8, 4.5))
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
-                        
-                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
-                        vals_t = df_t_valid[f].dropna().values
-                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
             st.markdown("---")
 
     # ==========================================================
@@ -669,6 +674,7 @@ if uploaded_file is not None:
                 vals_all = plot_df[t4_feat].values
                 cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
                 
+                # Render Badge ON TOP of chart only
                 render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
                 
                 dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
