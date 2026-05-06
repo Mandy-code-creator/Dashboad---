@@ -936,7 +936,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Analyzing customer scrap rates based on Usage Month using Task 5 logic to validate the impact of the customer's machine upgrade.")
+        st.info("Analyzing customer scrap rates based on Usage Month. AI automatically filters split-coils to isolate machine impact from material quality.")
         
         USAGE_COL = '使用月份'
         COIL_ID_COL = '鋼捲號碼'
@@ -984,7 +984,6 @@ if uploaded_file is not None:
             # --- 2. MICRO VIEW (SPLIT COIL) ---
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Analysis (Before vs After Upgrade)")
-            st.info("Identifying specific coils used in both periods to prove the scrap variation is machine-dependent, not material-dependent.")
             
             def classify_period(m):
                 try:
@@ -1016,29 +1015,69 @@ if uploaded_file is not None:
             split_coils = coils_before.intersection(coils_after)
             
             if split_coils:
+                st.markdown("#### 🔍 AI Split-Coil Diagnosis")
+                st.info("Tracking the exact same coils run on both the old and new machines to assign the root cause.")
+                
+                split_data = []
+                for coil in split_coils:
+                    df_c = coil_status_scrap[coil_status_scrap[COIL_ID_COL] == coil]
+                    before_val = df_c[df_c['Machine_Status'] == 'Before Upgrade (< April)']['Scrap_Rate'].values
+                    after_val = df_c[df_c['Machine_Status'] == 'After Upgrade (>= April)']['Scrap_Rate'].values
+                    
+                    b_val = before_val[0] if len(before_val) > 0 else 0
+                    a_val = after_val[0] if len(after_val) > 0 else 0
+                    
+                    # Fetch material properties to prove consistency
+                    props = df_t6[df_t6[COIL_ID_COL] == coil][['YS', 'TS', 'EL']].mean().to_dict()
+                    
+                    # AI Root Cause Judgment Logic
+                    if b_val > 10 and a_val < 5:
+                        judgment = "🚨 Old Machine Issue (Proven)"
+                    elif b_val > 10 and a_val >= 5:
+                        judgment = "⚠️ Material / Severe Process Issue"
+                    elif a_val > b_val + 5:
+                        judgment = "⚙️ New Machine Tuning Issue"
+                    else:
+                        judgment = "✅ Normal / Stable"
+                        
+                    split_data.append({
+                        'Coil ID': coil,
+                        'Scrap (Old Machine)': b_val,
+                        'Scrap (New Machine)': a_val,
+                        'Delta (%)': b_val - a_val,
+                        'AI Root Cause': judgment,
+                        'Theoretical YS': props.get('YS', np.nan),
+                        'Theoretical TS': props.get('TS', np.nan),
+                        'Theoretical EL': props.get('EL', np.nan)
+                    })
+                    
+                split_report = pd.DataFrame(split_data)
+                
+                # Display Styled Dataframe
+                st.dataframe(
+                    split_report.style.format({
+                        'Scrap (Old Machine)': '{:.2f}%',
+                        'Scrap (New Machine)': '{:.2f}%',
+                        'Delta (%)': '{:.2f}%',
+                        'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'
+                    }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
+                    use_container_width=True, hide_index=True
+                )
+                
+                # Bar Chart for visual comparison
                 split_df = coil_status_scrap[coil_status_scrap[COIL_ID_COL].isin(split_coils)]
                 split_pivot = split_df.pivot_table(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate', aggfunc='mean')
                 
-                if not split_pivot.empty:
-                    fig_s, ax_s = plt.subplots(figsize=(10, 5))
-                    split_pivot.plot(kind='bar', ax=ax_s, color=['#ff7f0e', '#1f77b4'], edgecolor='white')
-                    ax_s.set_ylabel("Scrap Rate (%)")
-                    ax_s.set_title("Same Coil Performance: Before vs After Machine Upgrade", fontweight='bold')
-                    add_chart_border(ax_s)
-                    plt.xticks(rotation=45, ha='right')
-                    st.pyplot(fig_s)
+                fig_s, ax_s = plt.subplots(figsize=(10, 5))
+                split_pivot.plot(kind='bar', ax=ax_s, color=['#ff7f0e', '#1f77b4'], edgecolor='white')
+                ax_s.set_ylabel("Scrap Rate (%)")
+                ax_s.set_title("Same Coil Scrap Rate: Old Machine vs New Machine", fontweight='bold')
+                add_chart_border(ax_s)
+                plt.xticks(rotation=45, ha='right')
+                st.pyplot(fig_s)
             else:
-                st.warning("No split-coils found (coils processed both before and after the upgrade).")
+                st.warning("No split-coils found (No single coil was processed on both the Old and New machines).")
 
-            # --- MATERIAL CONSISTENCY CHECK ---
-            st.markdown("---")
-            st.subheader("Material Consistency Check (Theoretical Values vs Actuals)")
-            st.info("Verifying that the Theoretical Values remained constant across the machine upgrade timeline.")
-            
-            prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
-            if prop_cols:
-                mat_df = df_t6.groupby('Machine_Status')[prop_cols].mean().round(2).reset_index()
-                st.dataframe(mat_df.style.highlight_max(axis=0, color='#e6f2ff'), use_container_width=True, hide_index=True)
         else:
             st.warning(f"Required columns '{USAGE_COL}', '{COIL_ID_COL}', '{LEN_COL}', or '{SCRAP_COL}' not found in the dataset.")
 
@@ -1058,6 +1097,8 @@ if uploaded_file is not None:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
+            if 'split_report' in locals() and not split_report.empty:
+                split_report.to_excel(writer, sheet_name='Split_Coil_AI_Diagnosis', index=False)
         
         st.sidebar.download_button(
             label="📥 Download Full Excel",
