@@ -304,9 +304,6 @@ if uploaded_file is not None:
         if cap_summary: 
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
-    # ==========================================================
-    # TASK 4: I-MR TRACKING
-    # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
         
@@ -379,7 +376,6 @@ if uploaded_file is not None:
                 ax1.set_xticklabels(dates.iloc[::step], rotation=45, ha='right', fontsize=9)
                 add_chart_border(ax1)
                 
-                # MR-Chart
                 ax2.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', alpha=0.6)
                 ax2.axhline(mr_mean, color='green', ls='--')
                 ax2.text(len(mr), mr_mean, f' Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
@@ -401,9 +397,6 @@ if uploaded_file is not None:
                 fig.tight_layout()
                 st.pyplot(fig)
 
-    # ==========================================================
-    # TASK 5: TAIL SCRAP & HYBRID TREND
-    # ==========================================================
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         COIL_ID_COL = '鋼捲號碼'
@@ -583,6 +576,26 @@ if uploaded_file is not None:
                 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
+            # 🚀 TÍNH NĂNG MỚI: BẢNG TRUY XUẤT NGUỒN GỐC
+            st.markdown("---")
+            st.subheader("🔍 Inventory Traceability (Production Origin of Used Coils)")
+            st.info("This table shows exactly WHEN the coils used by the customer in a given month were actually produced by our factory.")
+            
+            trace_df = df_t6.groupby(['Display_Month', 'Time_Group']).agg(
+                Coil_Count=(COIL_ID_COL, 'nunique'),
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum')
+            ).reset_index()
+            trace_df['Scrap_Rate (%)'] = np.where(trace_df['Total_Length'] > 0, (trace_df['Total_Scrap'] / trace_df['Total_Length']) * 100, 0).round(2)
+            trace_df.rename(columns={'Display_Month': 'Usage Month (Khách hàng dùng)', 'Time_Group': 'Production Period (Nhà máy sản xuất)'}, inplace=True)
+            
+            st.dataframe(
+                trace_df.style.format({
+                    'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'
+                }).background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
+                use_container_width=True, hide_index=True
+            )
+
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Diagnosis")
             
