@@ -31,17 +31,27 @@ uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"]
 
 if uploaded_file is not None:
     df_raw = pd.read_excel(uploaded_file)
+    
+    # 🚀 FIX LỖI MẤT DỮ LIỆU: Đổi tên các cột trùng lặp thành .1, .2 thay vì xóa bỏ
     df_raw.columns = df_raw.columns.astype(str).str.strip()
-    df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]
+    cols = pd.Series(df_raw.columns)
+    for dup in cols[cols.duplicated()].unique():
+        cols[cols[cols == dup].index.values.tolist()] = [f"{dup}.{i}" if i != 0 else dup for i in range(sum(cols == dup))]
+    df_raw.columns = cols
 
     # --- 1. GLOBAL PRE-PROCESSING ---
     df = df_raw.copy()
     
-    df.rename(columns={
+    # 🚀 FIX LỖI TYPE ERROR: Gộp các cột độ dày bị trùng an toàn
+    rename_dict = {
         'Thickness': 'Actual_Thickness', '厚度': 'Actual_Thickness',
         '烤漆降伏強度': 'YS', '烤漆抗拉強度': 'TS', '伸長率': 'EL'
-    }, inplace=True)
-    df = df.loc[:, ~df.columns.duplicated()]
+    }
+    df.rename(columns=rename_dict, inplace=True)
+    if 'Actual_Thickness' in df.columns and isinstance(df.get('Actual_Thickness'), pd.DataFrame):
+        df['Temp_Thick'] = df['Actual_Thickness'].bfill(axis=1).iloc[:, 0]
+        df = df.drop(columns=['Actual_Thickness'])
+        df.rename(columns={'Temp_Thick': 'Actual_Thickness'}, inplace=True)
 
     if '熱軋材質' in df.columns:
         df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
@@ -59,11 +69,17 @@ if uploaded_file is not None:
         if f in df.columns:
             df[f] = pd.to_numeric(df[f], errors='coerce')
 
-    # Dates
+    # 🚀 FIX LỖI THỜI GIAN: Bọc thép hàm đọc ngày tháng
     date_key = '烤三生產日期' 
     if date_key in df.columns:
-        d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
+        def parse_production_dates(s):
+            if pd.api.types.is_datetime64_any_dtype(s): return s
+            s_str = s.astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            res = pd.to_datetime(s_str, format='%Y%m%d', errors='coerce')
+            res = res.fillna(pd.to_datetime(s_str, errors='coerce'))
+            return res
+            
+        df['Production_Date'] = parse_production_dates(df[date_key])
         
         def categorize_period(d):
             if pd.isnull(d): return "Unknown"
@@ -87,7 +103,7 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Grades
+    # Grades Calculation
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = [c for c in df.columns if str(c).strip() == g or str(c).strip().startswith(f"{g}.")]
@@ -214,7 +230,6 @@ if uploaded_file is not None:
         st.header("3. Distribution & Process Capability (SPC)")
         st.info("Visualizing mechanical property distribution based on valid quality levels A and B.")
         
-        # Capability helper
         def calc_capability(values, feat, period_label, thickness):
             vals = np.array(values, dtype=float)
             vals = vals[~np.isnan(vals)]
@@ -264,6 +279,7 @@ if uploaded_file is not None:
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
+        
         df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
         
@@ -354,17 +370,25 @@ if uploaded_file is not None:
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         
-        USAGE_COL = '使用日期' if '使用日期' in df_global.columns else '使用月份'
+        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
+        USAGE_COL = next((c for c in possible_usage_cols if c in df_global.columns), None)
         COIL_ID_COL = '鋼捲號碼'
         
-        if USAGE_COL in df_global.columns and COIL_ID_COL in df_global.columns:
+        if USAGE_COL and COIL_ID_COL in df_global.columns and LEN_COL in df_global.columns and SCRAP_COL in df_global.columns:
             df_t6 = df_global.copy()
             
             # --- BỘ LỌC KHẮT KHE ---
             df_t6 = df_t6[df_t6[LEN_COL] > 0]
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
-            df_t6['Parsed_Date'] = pd.to_datetime(df_t6[USAGE_COL], errors='coerce')
+            
+            def safe_parse_usage_date(s):
+                if pd.api.types.is_datetime64_any_dtype(s): return s
+                s_str = s.astype(str).str.strip()
+                res = pd.to_datetime(s_str, dayfirst=True, errors='coerce')
+                return res
+                
+            df_t6['Parsed_Date'] = safe_parse_usage_date(df_t6[USAGE_COL])
             df_t6 = df_t6.dropna(subset=['Parsed_Date'])
             
             # Xử lý thời gian
@@ -422,3 +446,5 @@ if uploaded_file is not None:
                 
             else:
                 st.warning("No split-coils found (No single coil was processed on both the Old and New machines).")
+        else:
+            st.warning("Required columns for usage analysis not found.")
