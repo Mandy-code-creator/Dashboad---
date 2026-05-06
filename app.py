@@ -363,19 +363,19 @@ if uploaded_file is not None:
         add_chart_border(ax)
 
     # --- TABS ---
-    tab0, tab1, tab3, tab4, tab5 = st.tabs([
-        "📁 Task 0: Raw Data", 
-        "📋 Task 1: Quality Yield", 
-        "📈 Task 3: Capability", 
-        "📉 Task 4: I-MR Tracking",
-        "✂️ Task 5: Tail Scrap"
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📁 1. Raw Data", 
+        "📋 2. Quality Yield", 
+        "📈 3. Capability (SPC)", 
+        "📉 4. I-MR Tracking",
+        "✂️ 5. Tail Scrap"
     ])
 
     # ==========================================================
-    # TASK 0: RAW DATA INSPECTION
+    # TASK 1: RAW DATA INSPECTION
     # ==========================================================
-    with tab0:
-        st.header("Raw Data Inspection")
+    with tab1:
+        st.header("1. Raw Data Inspection")
         st.info("Grouped Thickness: 0.5mm (0.47, 0.50), 0.6mm (0.53-0.60), 0.8mm (0.63-0.80). Unmatched and empty rows removed.")
         
         col_m1, col_m2, col_m3 = st.columns(3)
@@ -393,12 +393,12 @@ if uploaded_file is not None:
         st.dataframe(df.head(50), use_container_width=True)
 
     # ==========================================================
-    # TASK 1: YIELD SUMMARY
+    # TASK 2: YIELD SUMMARY
     # ==========================================================
-    with tab1:
-        st.header("Executive Quality Yield Summary")
+    with tab2:
+        st.header("2. Executive Quality Yield Summary")
         
-        st.subheader("1. Detailed Yield by Thickness & Material")
+        st.subheader("Detailed Yield by Thickness & Material")
         yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[
             ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']
         ].sum().reset_index()
@@ -427,7 +427,7 @@ if uploaded_file is not None:
             st.info("No yield data available to display in this view.")
 
         st.markdown("---")
-        st.subheader("📊 2. Grade Distribution by Time Period (%)")
+        st.subheader("📊 Grade Distribution by Time Period (%)")
         
         grade_dist = df.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
@@ -492,7 +492,7 @@ if uploaded_file is not None:
             st.pyplot(fig_g)
 
         st.markdown("---")
-        st.subheader("3. Charts by Period & Thickness")
+        st.subheader("Charts by Period & Thickness")
         col_c1, col_c2 = st.columns(2)
         with col_c1:
             st.markdown("**Yield (%) by Period & Thickness**")
@@ -539,7 +539,7 @@ if uploaded_file is not None:
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
     # ==========================================================
     with tab3:
-        st.header("📊 Distribution & Process Capability (SPC)")
+        st.header("3. Distribution & Process Capability (SPC)")
         st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards. Limit calculations strictly based on grades A or B (A-B+, A-B).")
 
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
@@ -633,7 +633,7 @@ if uploaded_file is not None:
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
     # ==========================================================
     with tab4:
-        st.header("📉 Post-Control Tracking (I-MR Charts)")
+        st.header("4. Post-Control Tracking (I-MR Charts)")
         st.info("Tracking process stability for production from 2026 onwards. Limits and charts calculated ONLY based on grades A or B (A-B+, A-B).")
         
         df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
@@ -704,38 +704,19 @@ if uploaded_file is not None:
                 if len(out_i) > 0:
                     ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50, label="Out of Control")
                     
-                # Adjust Y-axis to comfortably fit all lines
                 all_y_vals = [v for v in [np.max(vals), np.min(vals), ucl_i, lcl_i, usl, lsl] if v is not None]
                 y_max = max(all_y_vals) if all_y_vals else 10
                 y_min = min(all_y_vals) if all_y_vals else 0
-                y_pad = (y_max - y_min) * 0.3 if (y_max - y_min) != 0 else 1
-                ax_i.set_ylim(y_min - y_pad*0.5, y_max + y_pad*1.5)
+                y_pad = (y_max - y_min) * 0.4 if (y_max - y_min) != 0 else 1
+                ax_i.set_ylim(y_min - y_pad*0.4, y_max + y_pad*1.2)
                 
                 ax_i.set_title(f"Individual (I) Chart - {t4_feat} ({t4_thick}mm)", fontweight='bold')
                 ax_i.set_ylabel("Value")
-                ax_i.legend(loc='upper right', ncol=2, fontsize=8)
+                
+                # Push Legend completely outside the plot area
+                ax_i.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1, fontsize=8)
                 add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
-                
-                # ADD CAPABILITY ANNOTATION BOX DIRECTLY ON I-CHART
-                if cap_data and cap_data['Cpk'] is not None:
-                    cpk_v = cap_data['Cpk']
-                    cp_v = cap_data['Cp']
-                    ca_v = cap_data['Ca']
-                    
-                    ca_str = f"Ca: {ca_v:.1f}%" if ca_v is not None else "Ca: N/A"
-                    box_color = '#2e7d32' if cpk_v >= 1.33 else ('#ffa726' if cpk_v >= 1.0 else '#d62728')
-                    
-                    info_text = f"Cpk: {cpk_v:.3f}\nCp: {cp_v:.3f}\n{ca_str}"
-                    ax_i.text(0.02, 0.05, info_text, transform=ax_i.transAxes,
-                              fontsize=10, fontweight='bold', color='#333333',
-                              verticalalignment='bottom', horizontalalignment='left',
-                              bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor=box_color, linewidth=2, alpha=0.9))
-                else:
-                    ax_i.text(0.02, 0.05, "Capability: N/A\n(Missing Specs)", transform=ax_i.transAxes,
-                              fontsize=10, fontweight='bold', color='#888888',
-                              verticalalignment='bottom', horizontalalignment='left',
-                              bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor="#cccccc", linewidth=1.5, alpha=0.9))
                 
                 # MR-Chart
                 ax_mr.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', linestyle='-', linewidth=1.5, markersize=5)
@@ -748,13 +729,16 @@ if uploaded_file is not None:
                     
                 ax_mr.set_title("Moving Range (MR) Chart", fontweight='bold')
                 ax_mr.set_ylabel("Range")
-                ax_mr.legend(loc='upper right')
+                
+                # Push Legend completely outside the plot area
+                ax_mr.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
                 add_chart_border(ax_mr)
                 
                 step = max(1, len(vals) // 15)
                 ax_mr.set_xticks(range(0, len(vals), step))
                 ax_mr.set_xticklabels(dates.iloc[::step], rotation=45, ha='right')
                 
+                # Allow Matplotlib to naturally adjust for the external legends
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
 
@@ -762,7 +746,7 @@ if uploaded_file is not None:
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
-        st.header("Tail Scrap & Length Rejection Analysis")
+        st.header("5. Tail Scrap & Length Rejection Analysis")
         
         COIL_ID_COL = '鋼捲號碼'
 
@@ -783,7 +767,7 @@ if uploaded_file is not None:
             )
 
             # --- 1. HYBRID TREND LINE ---
-            st.subheader("1. Rejection Rate Trend (%)")
+            st.subheader("Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
                 Input_Length=(LEN_COL, 'sum'),
@@ -837,7 +821,7 @@ if uploaded_file is not None:
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
-            st.subheader("2. Scrap Rate by Time Period")
+            st.subheader("Scrap Rate by Time Period")
             scrap_by_period = df_scrap_master.groupby('Time_Group').agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
@@ -876,7 +860,7 @@ if uploaded_file is not None:
 
             # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
-            st.subheader("3. Deep Analysis: Scrap Rate by Period / Thickness / Material")
+            st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
