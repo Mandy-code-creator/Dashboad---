@@ -50,11 +50,17 @@ if uploaded_file is not None:
     }
     df.rename(columns=rename_dict, inplace=True)
     
+    # XÓA CÁC CỘT TRÙNG LẶP (FIX LỖI TYPEERROR TẠI ĐÂY)
+    df = df.loc[:, ~df.columns.duplicated()]
+    
     if 'Actual_Thickness' not in df.columns:
         for i, c in enumerate(df.columns):
             if '型式' in c and i > 0:
                 df.rename(columns={df.columns[i - 1]: 'Actual_Thickness'}, inplace=True)
                 break
+                
+    # Chốt chặn xóa trùng lặp lần 2 để an toàn tuyệt đối
+    df = df.loc[:, ~df.columns.duplicated()]
                 
     if '熱軋材質' in df.columns:
         df['HR_Material'] = df['熱軋材質'].astype(str).str.strip().replace(['nan', ''], 'Unknown')
@@ -113,7 +119,7 @@ if uploaded_file is not None:
     df['Valid_Qty'] = df[['A-B+', 'A-B']].sum(axis=1)
 
     # ==========================================
-    # ---> SAVE GLOBAL DF HERE (FIX FOR TASK 6) <---
+    # LƯU TRỮ DỮ LIỆU GỐC CHO TASK 6 (KHÁCH HÀNG)
     # ==========================================
     df_global = df.copy()
     df_global_grades = df[df['Total_Qty'] > 0].copy()
