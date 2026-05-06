@@ -717,6 +717,26 @@ if uploaded_file is not None:
                 add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
                 
+                # ADD CAPABILITY ANNOTATION BOX DIRECTLY ON I-CHART
+                if cap_data and cap_data['Cpk'] is not None:
+                    cpk_v = cap_data['Cpk']
+                    cp_v = cap_data['Cp']
+                    ca_v = cap_data['Ca']
+                    
+                    ca_str = f"Ca: {ca_v:.1f}%" if ca_v is not None else "Ca: N/A"
+                    box_color = '#2e7d32' if cpk_v >= 1.33 else ('#ffa726' if cpk_v >= 1.0 else '#d62728')
+                    
+                    info_text = f"Cpk: {cpk_v:.3f}\nCp: {cp_v:.3f}\n{ca_str}"
+                    ax_i.text(0.02, 0.05, info_text, transform=ax_i.transAxes,
+                              fontsize=10, fontweight='bold', color='#333333',
+                              verticalalignment='bottom', horizontalalignment='left',
+                              bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor=box_color, linewidth=2, alpha=0.9))
+                else:
+                    ax_i.text(0.02, 0.05, "Capability: N/A\n(Missing Specs)", transform=ax_i.transAxes,
+                              fontsize=10, fontweight='bold', color='#888888',
+                              verticalalignment='bottom', horizontalalignment='left',
+                              bbox=dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor="#cccccc", linewidth=1.5, alpha=0.9))
+                
                 # MR-Chart
                 ax_mr.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', linestyle='-', linewidth=1.5, markersize=5)
                 ax_mr.axhline(mr_mean, color='green', linestyle='--', label=f'MR Mean: {mr_mean:.2f}')
