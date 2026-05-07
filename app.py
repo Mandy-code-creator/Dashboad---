@@ -614,22 +614,28 @@ if uploaded_file is not None:
                     st.pyplot(fig_h1)
 
                 with col_h2:
-                    st.markdown("**2. Quality Grade Distribution by Usage Month**")
-                    st.caption("100% Stacked Bar: Track how the customer's grading standard shifts over time.")
+                    st.markdown("**2. Quality Grade Distribution (Usage vs. Production)**")
+                    st.caption("100% Stacked Bar: Track how grading standards shift for specific production batches.")
                     
-                    # 🚀 CẬP NHẬT: BIỂU ĐỒ CỘT CHỒNG 100% (100% STACKED BAR CHART)
-                    grade_agg_usage = df_trace_base.groupby('Display_Month')[available_grades].sum()
-                    grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
-                    grade_pct_usage = grade_pct_usage.fillna(0)
+                    # 🚀 CẬP NHẬT: NHÃN KÉP CHO TRỤC X ĐỂ KHÔNG MẤT DỮ LIỆU SẢN XUẤT
+                    grade_agg_combo = df_trace_base.groupby(['Display_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_agg_combo = grade_agg_combo.sort_values(['Display_Month', 'Time_Group'])
                     
-                    fig_g2, ax_g2 = plt.subplots(figsize=(10, max(4, len(pivot_scrap) * 0.6))) 
+                    # Tạo nhãn kết hợp: "Tháng sử dụng \n (Sản xuất: Tháng nào)"
+                    grade_agg_combo['Combo_Label'] = grade_agg_combo['Display_Month'] + "\n(Prod: " + grade_agg_combo['Time_Group'] + ")"
+                    grade_agg_combo.set_index('Combo_Label', inplace=True)
+                    
+                    grade_pct_combo = grade_agg_combo[available_grades].div(grade_agg_combo[available_grades].sum(axis=1), axis=0) * 100
+                    grade_pct_combo = grade_pct_combo.fillna(0)
+                    
+                    fig_g2, ax_g2 = plt.subplots(figsize=(10, max(4, len(grade_pct_combo) * 0.6))) 
                     
                     color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
                     plot_colors = [color_map.get(g, '#888') for g in available_grades]
                     
-                    grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
+                    grade_pct_combo.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
                     ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
-                    ax_g2.set_xlabel("Usage Month", fontweight='bold')
+                    ax_g2.set_xlabel("Usage Month (Production Period)", fontweight='bold')
                     ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
                     ax_g2.set_ylim(0, 105)
                     
@@ -637,7 +643,7 @@ if uploaded_file is not None:
                         labels = [f"{v.get_height():.1f}%" if v.get_height() > 5 else "" for v in c]
                         ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
                         
-                    plt.xticks(rotation=45, ha='right')
+                    plt.xticks(rotation=45, ha='right', fontsize=9)
                     add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
