@@ -756,6 +756,7 @@ if uploaded_file is not None:
                 st.pyplot(fig_imr)
 
     # ==========================================================
+# ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
@@ -764,6 +765,7 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
+            # Loại bỏ dòng tổng kết cả năm để biểu đồ không bị nhiễu
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
@@ -871,9 +873,11 @@ if uploaded_file is not None:
                 use_container_width=True, hide_index=True
             )
 
-            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
+            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS (SỬA LỖI 50%) ---
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
+            
+            # Khởi tạo bảng chi tiết cơ sở (Dùng để hiển thị ở cuối)
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
@@ -884,17 +888,26 @@ if uploaded_file is not None:
             scrap_detail['Scrap_Rate (%)'] = (scrap_detail['Total_Scrap'] / scrap_detail['Total_Length'] * 100).round(2)
             
             col_t, col_m = st.columns(2)
+            
             with col_t:
                 st.markdown("**Scrap Rate by Period & Thickness**")
                 fig_t, ax_t = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    pivot_t = scrap_detail.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Scrap_Rate (%)', aggfunc='mean')
+                    # Gộp tổng Length và Scrap theo Thickness trước, sau đó mới chia tỷ lệ %
+                    thick_agg = scrap_detail.groupby(['Time_Group', 'Actual_Thickness']).agg(
+                        T_Len=('Total_Length', 'sum'),
+                        T_Scrap=('Total_Scrap', 'sum')
+                    )
+                    thick_agg['Rate'] = np.where(thick_agg['T_Len'] > 0, (thick_agg['T_Scrap'] / thick_agg['T_Len']) * 100, 0)
+                    pivot_t = thick_agg['Rate'].unstack()
+                    
                     if not pivot_t.empty:
-                        pivot_t.plot(kind='bar', ax=ax_t, color=solid_colors, edgecolor='white')
+                        pivot_t.plot(kind='bar', ax=ax_t, colormap='tab10', edgecolor='white')
                         ax_t.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
                         for c in ax_t.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                             ax_t.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
+                    
                     y_max = pivot_t.max().max() if not pivot_t.isna().all().all() else 10
                     ax_t.set_ylim(0, y_max * 1.4 + 2)
                 ax_t.set_ylabel("Scrap Rate (%)")
@@ -908,13 +921,21 @@ if uploaded_file is not None:
                 st.markdown("**Scrap Rate by Period & Material**")
                 fig_m, ax_m = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    pivot_m = scrap_detail.pivot_table(index='Time_Group', columns='HR_Material', values='Scrap_Rate (%)', aggfunc='mean')
+                    # Gộp tổng Length và Scrap theo Material trước, sau đó mới chia tỷ lệ %
+                    mat_agg = scrap_detail.groupby(['Time_Group', 'HR_Material']).agg(
+                        M_Len=('Total_Length', 'sum'),
+                        M_Scrap=('Total_Scrap', 'sum')
+                    )
+                    mat_agg['Rate'] = np.where(mat_agg['M_Len'] > 0, (mat_agg['M_Scrap'] / mat_agg['M_Len']) * 100, 0)
+                    pivot_m = mat_agg['Rate'].unstack()
+                    
                     if not pivot_m.empty:
                         pivot_m.plot(kind='bar', ax=ax_m, colormap='tab10', edgecolor='white')
                         ax_m.legend(title="Material", bbox_to_anchor=(1.02, 1), loc='upper left')
                         for c in ax_m.containers:
                             labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
                             ax_m.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
+                    
                     y_max = pivot_m.max().max() if not pivot_m.isna().all().all() else 10
                     ax_m.set_ylim(0, y_max * 1.4 + 2)
                 ax_m.set_ylabel("Scrap Rate (%)")
@@ -935,8 +956,6 @@ if uploaded_file is not None:
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
-
-    # ==========================================================
 # ==========================================================
 # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
