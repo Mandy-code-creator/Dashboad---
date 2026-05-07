@@ -577,28 +577,24 @@ if uploaded_file is not None:
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
             st.markdown("---")
-            st.subheader("🔍 Inventory Traceability Matrices (Post Q4/2025)")
-            st.info("These matrices visualize how material from different production periods performed during specific usage months.")
+            st.subheader("🔍 Inventory Traceability & Grade Matrix (Post Q4/2025)")
+            st.info("Visualize how material from different production periods performed and how grading standards shifted over time.")
             
             df_trace_base = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
             
             if not df_trace_base.empty:
-                # 🚀 TÍNH TOÁN CÁC CẤP ĐỘ CHẤT LƯỢNG CHO TỪNG Ô MA TRẬN
+                available_grades = [g for g in base_grades if g in df_trace_base.columns]
+                
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'),
                     'Total_Scrap': (SCRAP_COL, 'sum'),
                     'Total_Coils': ('Total_Qty', 'sum')
                 }
-                # Lấy danh sách các cột cấp độ chất lượng có thật trong dữ liệu
-                available_grades = [g for g in base_grades if g in df_trace_base.columns]
                 
                 trace_agg = df_trace_base.groupby(['Display_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                
-                # Gộp tổng số cuộn của từng cấp độ vào bảng
                 grade_agg = df_trace_base.groupby(['Display_Month', 'Time_Group'])[available_grades].sum().reset_index()
                 trace_agg = pd.merge(trace_agg, grade_agg, on=['Display_Month', 'Time_Group'], how='left')
                 
-                # Tính % cho Scrap và cho TỪNG CẤP ĐỘ (Grade)
                 trace_agg['Scrap_Rate (%)'] = np.where(trace_agg['Total_Length'] > 0, (trace_agg['Total_Scrap'] / trace_agg['Total_Length']) * 100, 0).round(2)
                 for g in available_grades:
                     trace_agg[f'{g} (%)'] = np.where(trace_agg['Total_Coils'] > 0, (trace_agg[g] / trace_agg['Total_Coils']) * 100, 0).round(2)
@@ -608,6 +604,7 @@ if uploaded_file is not None:
                 with col_h1:
                     pivot_scrap = trace_agg.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
                     st.markdown("**1. Scrap Rate (%) Heatmap**")
+                    st.caption("Red zones indicate high scrap rates for specific production batches.")
                     fig_h1, ax_h1 = plt.subplots(figsize=(10, max(4, len(pivot_scrap) * 0.6)))
                     sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
                     ax_h1.set_ylabel("Usage Month", fontweight='bold')
@@ -617,26 +614,33 @@ if uploaded_file is not None:
                     st.pyplot(fig_h1)
 
                 with col_h2:
-                    st.markdown("**2. Quality Grade (%) Heatmap**")
-                    st.caption("Track how the customer's grading standard shifts over time.")
+                    st.markdown("**2. Quality Grade Distribution by Usage Month**")
+                    st.caption("100% Stacked Bar: Track how the customer's grading standard shifts over time.")
                     
-                    # 🚀 DROPDOWN LỰA CHỌN CẤP ĐỘ ĐỂ HIỂN THỊ
-                    grade_options = [f"{g} (%)" for g in available_grades]
-                    selected_grade = st.selectbox("Select Grade to View:", grade_options, label_visibility="collapsed")
+                    # 🚀 CẬP NHẬT: BIỂU ĐỒ CỘT CHỒNG 100% (100% STACKED BAR CHART)
+                    grade_agg_usage = df_trace_base.groupby('Display_Month')[available_grades].sum()
+                    grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
+                    grade_pct_usage = grade_pct_usage.fillna(0)
                     
-                    if selected_grade:
-                        pivot_grade = trace_agg.pivot(index='Display_Month', columns='Time_Group', values=selected_grade)
-                        fig_h2, ax_h2 = plt.subplots(figsize=(10, max(4, len(pivot_grade) * 0.6)))
+                    fig_g2, ax_g2 = plt.subplots(figsize=(10, max(4, len(pivot_scrap) * 0.6))) 
+                    
+                    color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
+                    plot_colors = [color_map.get(g, '#888') for g in available_grades]
+                    
+                    grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
+                    ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
+                    ax_g2.set_xlabel("Usage Month", fontweight='bold')
+                    ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    ax_g2.set_ylim(0, 105)
+                    
+                    for c in ax_g2.containers:
+                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 5 else "" for v in c]
+                        ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
                         
-                        # Màu Xanh cho hàng tốt (A, B+), màu Cam/Đỏ cho hàng xấu (B-, B)
-                        cmap_choice = "Greens" if "A" in selected_grade else "Oranges"
-                        
-                        sns.heatmap(pivot_grade, annot=True, fmt=".1f", cmap=cmap_choice, linewidths=1, linecolor='white', ax=ax_h2, annot_kws={"size": 10, "weight": "bold"})
-                        ax_h2.set_ylabel("Usage Month", fontweight='bold')
-                        ax_h2.set_xlabel("Production Period", fontweight='bold')
-                        plt.xticks(rotation=45, ha='right')
-                        fig_h2.tight_layout()
-                        st.pyplot(fig_h2)
+                    plt.xticks(rotation=45, ha='right')
+                    add_chart_border(ax_g2)
+                    fig_g2.tight_layout()
+                    st.pyplot(fig_g2)
                 
                 with st.expander("📂 View Detailed Traceability Data"):
                     trace_detailed = trace_agg.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
