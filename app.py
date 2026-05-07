@@ -975,7 +975,7 @@ if uploaded_file is not None:
                     lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)'
                 )
 
-                # 3 & 4. Monthly Scrap & Material Stability Analysis
+                # 3 & 4. Monthly Scrap & Material Stability Analysis (BỔ SUNG YPE)
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -984,15 +984,21 @@ if uploaded_file is not None:
                     Total_Scrap=(SCRAP_COL, 'sum'),
                     Avg_YS=('YS', 'mean'),
                     Avg_TS=('TS', 'mean'),
-                    Avg_EL=('EL', 'mean')
+                    Avg_EL=('EL', 'mean'),
+                    Avg_YPE=('YPE', 'mean') # Thêm tổng hợp YPE
                 ).reset_index()
                 macro_df = macro_df.sort_values('Usage_Month')
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
 
-                cols = st.columns(3)
+                # Đổi layout sang 2 hàng, mỗi hàng 2 cột để chứa đủ 4 biểu đồ
+                row1_cols = st.columns(2)
+                row2_cols = st.columns(2)
+                cols = row1_cols + row2_cols 
+                
                 features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
                             ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
-                            ('Avg_EL', 'Theoretical EL', '#9467bd')]
+                            ('Avg_EL', 'Theoretical EL', '#9467bd'),
+                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')] # Thêm cấu hình đồ thị YPE
 
                 for idx, (col_name, label, color) in enumerate(features):
                     with cols[idx]:
@@ -1003,27 +1009,28 @@ if uploaded_file is not None:
                         ax1.plot(macro_df['Usage_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
                         ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
                         
-                        # Fix potential ylim error if all scrap rates are 0
                         max_scrap = macro_df['Scrap_Rate (%)'].max()
                         ax1.set_ylim(-0.5, max_scrap * 1.35 + 1 if max_scrap > 0 else 5)
 
                         ax2 = ax1.twinx()
-                        feat_valid = macro_df[col_name].dropna()
-                        if not feat_valid.empty:
-                            ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
-                            ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
-                            ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
-                            feat_mean = feat_valid.mean()
-                            if feat_mean > 0:
-                                ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
+                        # Xử lý trường hợp cột YPE không tồn tại trong data
+                        if col_name in macro_df.columns:
+                            feat_valid = macro_df[col_name].dropna()
+                            if not feat_valid.empty:
+                                ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
+                                ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
+                                ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
+                                feat_mean = feat_valid.mean()
+                                if feat_mean > 0:
+                                    ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        add_chart_border(ax1)
+                        add_chart_border(ax1) # Giả định hàm này đã được định nghĩa ở trên
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
 
-                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
+                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
 
                 st.markdown("---")
                 
@@ -1041,9 +1048,7 @@ if uploaded_file is not None:
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # ==========================================================
-                # SỬA LỖI: Build Rich HTML Matrix (Đã được nén thành chuỗi)
-                # ==========================================================
+                # Build Rich HTML Matrix (Bản vá lỗi hiển thị)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
 
@@ -1165,7 +1170,9 @@ if uploaded_file is not None:
                     
                     if old_val == 0 and new_val == 0: continue
                     
-                    props = df_t6[df_t6[COIL_ID_COL] == coil][['YS', 'TS', 'EL']].mean().to_dict()
+                    # Bổ sung lấy thuộc tính YPE
+                    props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+                    props = df_t6[df_t6[COIL_ID_COL] == coil][props_cols].mean().to_dict()
                     
                     # Root Cause Classification Logic
                     if old_val > 10 and new_val < 5: 
@@ -1186,7 +1193,8 @@ if uploaded_file is not None:
                         'Delta (%)': old_val - new_val, 
                         'Theoretical YS': props.get('YS', np.nan),
                         'Theoretical TS': props.get('TS', np.nan), 
-                        'Theoretical EL': props.get('EL', np.nan), 
+                        'Theoretical EL': props.get('EL', np.nan),
+                        'Theoretical YPE': props.get('YPE', np.nan), # Đưa YPE vào bảng
                         'Root Cause Classification': root
                     })
                     
@@ -1195,7 +1203,7 @@ if uploaded_file is not None:
                     st.dataframe(
                         split_report.style.format({
                             'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
-                            'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'
+                            'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}', 'Theoretical YPE': '{:.1f}'
                         }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
                         use_container_width=True, hide_index=True
                     )
