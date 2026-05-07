@@ -544,30 +544,23 @@ if uploaded_file is not None:
             if not macro_df.empty:
                 st.markdown("**Correlation between Scrap Rate and Theoretical Values (YS, TS, EL)**")
                 cols = st.columns(3)
-                
-                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
-                            ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
-                            ('Avg_EL', 'Theoretical EL', '#9467bd')]
+                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), ('Avg_TS', 'Theoretical TS', '#2ca02c'), ('Avg_EL', 'Theoretical EL', '#9467bd')]
                 
                 for idx, (col_name, label, color) in enumerate(features):
                     with cols[idx]:
                         fig_exec, ax1 = plt.subplots(figsize=(6, 4))
-                        
                         color1 = '#d62728' 
                         ax1.set_ylabel('Scrap Rate (%)', color=color1, fontweight='bold', fontsize=9)
                         ax1.plot(macro_df['Display_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
                         ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
                         ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.5 + 1)
-                        
                         ax2 = ax1.twinx()
                         feat_valid = macro_df[col_name].dropna()
                         if not feat_valid.empty:
                             ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
                             ax2.plot(macro_df['Display_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
                             ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
-                            feat_mean = feat_valid.mean()
-                            ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
-                        
+                            ax2.set_ylim(feat_valid.mean() * 0.85, feat_valid.mean() * 1.15) 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Display_Month'], rotation=45, ha='right', fontsize=8)
                         add_chart_border(ax1)
@@ -576,53 +569,57 @@ if uploaded_file is not None:
                 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
             
+            # --- TRACEABILITY HEATMAPS ---
             st.markdown("---")
-            st.subheader("🔍 Inventory Traceability (Production Origin of Used Coils)")
-            st.info("Visual matrix showing when the scrapped coils were originally produced. Filtered from Q4 2025 onwards.")
+            st.subheader("🔍 Inventory Traceability Matrix (Post Q4/2025)")
+            st.info("These matrices visualize how material from different production months performed during specific usage months.")
             
             df_trace_base = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
             
             if not df_trace_base.empty:
-                trace_df = df_trace_base.groupby(['Display_Month', 'Time_Group']).agg(
+                # Calculate metrics
+                trace_agg = df_trace_base.groupby(['Display_Month', 'Time_Group']).agg(
                     Total_Length=(LEN_COL, 'sum'),
-                    Total_Scrap=(SCRAP_COL, 'sum')
+                    Total_Scrap=(SCRAP_COL, 'sum'),
+                    Total_Coils=('Total_Qty', 'sum'),
+                    Valid_Coils=('Valid_Qty', 'sum')
                 ).reset_index()
-                trace_df['Scrap_Rate (%)'] = np.where(trace_df['Total_Length'] > 0, (trace_df['Total_Scrap'] / trace_df['Total_Length']) * 100, 0).round(2)
                 
-                pivot_trace = trace_df.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
+                trace_agg['Scrap_Rate'] = np.where(trace_agg['Total_Length'] > 0, (trace_agg['Total_Scrap'] / trace_agg['Total_Length']) * 100, 0)
+                trace_agg['A-B_Acceptance'] = np.where(trace_agg['Total_Coils'] > 0, (trace_agg['Valid_Coils'] / trace_agg['Total_Coils']) * 100, 0)
                 
-                st.markdown("**Scrap Rate (%) Heatmap by Usage vs. Production Month (Q4/2025 Onwards)**")
+                pivot_scrap = trace_agg.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate')
+                pivot_grade = trace_agg.pivot(index='Display_Month', columns='Time_Group', values='A-B_Acceptance')
                 
-                fig_heat, ax_heat = plt.subplots(figsize=(10, max(4, len(pivot_trace) * 0.6)))
-                sns.heatmap(pivot_trace, annot=True, fmt=".1f", cmap="Reds", 
-                            linewidths=1, linecolor='white', 
-                            cbar_kws={'label': 'Scrap Rate (%)'}, ax=ax_heat,
-                            annot_kws={"size": 10, "weight": "bold"})
+                col_h1, col_h2 = st.columns(2)
                 
-                ax_heat.set_ylabel("Usage Month", fontweight='bold')
-                ax_heat.set_xlabel("Production Period", fontweight='bold')
-                ax_heat.set_title("Traceability Matrix (Post-Improvement)", fontweight='bold', pad=15)
-                plt.xticks(rotation=45, ha='right')
-                fig_heat.tight_layout()
-                st.pyplot(fig_heat)
+                with col_h1:
+                    st.markdown("**1. Scrap Rate (%) Heatmap**")
+                    fig_h1, ax_h1 = plt.subplots(figsize=(10, max(4, len(pivot_scrap) * 0.6)))
+                    sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
+                    ax_h1.set_ylabel("Usage Month", fontweight='bold'); ax_h1.set_xlabel("Production Period", fontweight='bold')
+                    plt.xticks(rotation=45, ha='right'); fig_h1.tight_layout()
+                    st.pyplot(fig_h1)
+
+                with col_h2:
+                    st.markdown("**2. Quality Grade Acceptance (%) Heatmap**")
+                    st.caption("Percentage of coils graded as A-B or above. Helps track shifts in customer inspection standards.")
+                    fig_h2, ax_h2 = plt.subplots(figsize=(10, max(4, len(pivot_grade) * 0.6)))
+                    # Use Greens_r (reversed) because higher acceptance is good
+                    sns.heatmap(pivot_grade, annot=True, fmt=".1f", cmap="RdYlGn", linewidths=1, linecolor='white', ax=ax_h2, annot_kws={"size": 10, "weight": "bold"})
+                    ax_h2.set_ylabel("Usage Month", fontweight='bold'); ax_h2.set_xlabel("Production Period", fontweight='bold')
+                    plt.xticks(rotation=45, ha='right'); fig_h2.tight_layout()
+                    st.pyplot(fig_h2)
                 
                 with st.expander("📂 View Detailed Traceability Data"):
-                    trace_detailed = trace_df.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
-                    st.dataframe(
-                        trace_detailed.style.format({
-                            'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'
-                        }).background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
-                        use_container_width=True, hide_index=True
-                    )
+                    st.dataframe(trace_agg.style.format({'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate': '{:.2f}%', 'A-B_Acceptance': '{:.2f}%'}), use_container_width=True, hide_index=True)
             else:
                 st.warning("No data available from Q4 2025 onwards for traceability.")
 
             st.markdown("---")
             st.subheader("Micro View: Split-Coil Diagnosis")
-            
             coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
             coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
-            
             coils_before = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'Old Machine (< Apr 2026)'][COIL_ID_COL])
             coils_after = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'New Machine (>= Apr 2026)'][COIL_ID_COL])
             split_coils = coils_before.intersection(coils_after)
@@ -634,36 +631,15 @@ if uploaded_file is not None:
                     df_c = coil_status_scrap[coil_status_scrap[COIL_ID_COL] == coil]
                     b_val = df_c[df_c['Machine_Status'] == 'Old Machine (< Apr 2026)']['Scrap_Rate'].values[0]
                     a_val = df_c[df_c['Machine_Status'] == 'New Machine (>= Apr 2026)']['Scrap_Rate'].values[0]
-                    
-                    if b_val == 0 and a_val == 0:
-                        continue
-                    
+                    if b_val == 0 and a_val == 0: continue
                     props = df_t6[df_t6[COIL_ID_COL] == coil][['YS', 'TS', 'EL']].mean().to_dict()
-                    
                     if b_val > 10 and a_val < 5: root = "🚨 Old Machine Issue (Proven)"
                     elif b_val > 10 and a_val >= 5: root = "⚠️ Material / Process Issue"
                     elif a_val > b_val + 5: root = "⚙️ New Machine Tuning Issue"
                     elif b_val > 0 and a_val == 0: root = "✅ Improved on New Machine"
                     else: root = "✅ Normal / Stable"
-                        
-                    split_data.append({
-                        'Coil ID': coil, 'Scrap (Old Machine)': b_val, 'Scrap (New Machine)': a_val,
-                        'Delta (%)': b_val - a_val, 'Theoretical YS': props.get('YS', np.nan),
-                        'Theoretical TS': props.get('TS', np.nan), 'Theoretical EL': props.get('EL', np.nan), 'Root Cause': root
-                    })
-                    
-                if len(split_data) > 0:
-                    split_report = pd.DataFrame(split_data)
-                    st.dataframe(
-                        split_report.style.format({
-                            'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
-                            'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'
-                        }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
-                        use_container_width=True, hide_index=True
-                    )
-                else:
-                    st.success("All coils processed across both machines achieved perfect quality (0% scrap). No defective coils to display.")
-            else:
-                st.warning("No split-coils found across the April 2026 transition line.")
-        else:
-            st.warning("Required columns for usage analysis not found.")
+                    split_data.append({'Coil ID': coil, 'Scrap (Old Machine)': b_val, 'Scrap (New Machine)': a_val, 'Delta (%)': b_val - a_val, 'Theoretical YS': props.get('YS', np.nan), 'Theoretical TS': props.get('TS', np.nan), 'Theoretical EL': props.get('EL', np.nan), 'Root Cause': root})
+                if split_data:
+                    st.dataframe(pd.DataFrame(split_data).style.format({'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%', 'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'}).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'), use_container_width=True, hide_index=True)
+                else: st.success("All multi-machine coils achieved 0% scrap.")
+            else: st.warning("No split-coils found across the April 2026 transition line.")
