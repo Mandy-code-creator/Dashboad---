@@ -157,16 +157,12 @@ if uploaded_file is not None:
         vals = np.array(values, dtype=float)
         vals = vals[~np.isnan(vals)]
         
-        if thickness == 'Overall':
-            return {'mean': np.mean(vals) if len(vals) > 0 else 0, 'std': np.std(vals, ddof=1) if len(vals) > 1 else 0, 'n': len(vals),
-                    'Cp': None, 'Cpk': None, 'Ca': None, 'LSL': None, 'USL': None, 'Target': None}
-
         if len(vals) < 2: return None
         mu  = np.mean(vals)
         std = np.std(vals, ddof=1)
         if std == 0: return None
 
-        spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
+        spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {}) if thickness != 'Overall' else {}
         lsl  = spec.get('min')
         usl  = spec.get('max')
         tgt  = spec.get('target')
@@ -175,7 +171,7 @@ if uploaded_file is not None:
                   'Cp': None, 'Cpk': None, 'Ca': None,
                   'LSL': lsl, 'USL': usl, 'Target': tgt}
 
-        if not is_valid_for_control(period_label):
+        if thickness == 'Overall' or not is_valid_for_control(period_label):
             return result
 
         if lsl is not None and usl is not None:
@@ -267,12 +263,49 @@ if uploaded_file is not None:
         "📉 4. I-MR Tracking", "✂️ 5. Tail Scrap", "🎯 6. Customer End-Use"
     ])
 
+    # ==========================================================
+    # TASK 1: RAW DATA INSPECTION
+    # ==========================================================
     with tab1:
         st.header("1. Raw Data Inspection")
         st.dataframe(df_raw, use_container_width=True)
 
+    # ==========================================================
+    # TASK 2: QUALITY YIELD & GRADE DISTRIBUTION
+    # ==========================================================
     with tab2:
         st.header("2. Executive Quality Yield Summary")
+        
+        # --- Khôi phục Biểu đồ Phân bổ Cấp độ Chất lượng ---
+        st.subheader("📊 Grade Distribution by Time Period (%)")
+        st.caption("Percentage of each quality grade produced over time.")
+
+        available_grades = [g for g in base_grades if g in df_global.columns]
+        grade_dist = df_global.groupby('Time_Group')[available_grades].sum()
+        grade_dist['Total'] = grade_dist.sum(axis=1)
+        grade_pct = grade_dist[available_grades].div(grade_dist['Total'].replace(0, np.nan), axis=0) * 100
+        grade_pct = grade_pct.fillna(0).sort_index(key=lambda x: x.map(get_sort_key))
+
+        fig_g, ax_g = plt.subplots(figsize=(10, 4))
+        grade_colors = ['#2e7d32', '#1f77b4', '#ffa726', '#ef5350', '#c62828']
+        grade_pct.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors[:len(available_grades)], edgecolor='white')
+        
+        ax_g.set_ylabel("Percentage (%)", fontweight='bold')
+        ax_g.set_xlabel("")
+        ax_g.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+        ax_g.set_ylim(0, 105)
+        
+        for c in ax_g.containers:
+            labels = [f"{v.get_height():.1f}%" if v.get_height() > 3 else "" for v in c]
+            ax_g.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=8)
+            
+        plt.xticks(rotation=45, ha='right')
+        add_chart_border(ax_g)
+        fig_g.tight_layout()
+        st.pyplot(fig_g)
+
+        st.markdown("---")
+        st.subheader("Detailed Yield by Thickness & Material")
         yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']].sum().reset_index()
         yield_summary = yield_summary[yield_summary['Total_Qty'] > 0]
         if not yield_summary.empty:
@@ -282,8 +315,12 @@ if uploaded_file is not None:
             yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
             st.dataframe(yield_summary.style.background_gradient(subset=['Yield (%)'], cmap='Greens').background_gradient(subset=['Defect_Rate (%)'], cmap='Reds'), use_container_width=True, hide_index=True)
 
+    # ==========================================================
+    # TASK 3: CAPABILITY (SPC)
+    # ==========================================================
     with tab3:
         st.header("3. Distribution & Process Capability (SPC)")
+        st.info("Visualizing mechanical property distribution based on valid quality levels A and B.")
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
         cap_summary = []
         for p in ordered_periods:
@@ -304,6 +341,9 @@ if uploaded_file is not None:
         if cap_summary: 
             st.dataframe(pd.DataFrame(cap_summary), use_container_width=True)
 
+    # ==========================================================
+    # TASK 4: I-MR TRACKING
+    # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
         
@@ -336,6 +376,7 @@ if uploaded_file is not None:
                 
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 9), gridspec_kw={'height_ratios': [2, 1]})
                 
+                # --- I-Chart ---
                 ax1.plot(vals, marker='o', color='#1f77b4', alpha=0.6, label='Actual Data')
                 
                 bbox_props = dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8, edgecolor="none")
@@ -376,13 +417,14 @@ if uploaded_file is not None:
                 ax1.set_xticklabels(dates.iloc[::step], rotation=45, ha='right', fontsize=9)
                 add_chart_border(ax1)
                 
+                # --- MR-Chart ---
                 ax2.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', alpha=0.6)
                 ax2.axhline(mr_mean, color='green', ls='--')
-                ax2.text(len(mr), mr_mean, f' Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
+                ax2.text(x_max-1, mr_mean, f' Mean MR: {mr_mean:.1f}', color='green', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 ucl_mr = 3.267 * mr_mean
                 ax2.axhline(ucl_mr, color='red', ls='--')
-                ax2.text(len(mr), ucl_mr, f' UCL MR: {ucl_mr:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
+                ax2.text(x_max-1, ucl_mr, f' UCL MR: {ucl_mr:.1f}', color='red', va='center', fontweight='bold', fontsize=9, bbox=bbox_props)
                 
                 out_mr = np.where(mr > ucl_mr)[0]
                 if len(out_mr) > 0:
@@ -397,6 +439,9 @@ if uploaded_file is not None:
                 fig.tight_layout()
                 st.pyplot(fig)
 
+    # ==========================================================
+    # TASK 5: TAIL SCRAP
+    # ==========================================================
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         COIL_ID_COL = '鋼捲號碼'
@@ -456,8 +501,6 @@ if uploaded_file is not None:
                 fig_p.tight_layout()
             st.pyplot(fig_p)
             
-            st.dataframe(scrap_p.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds').format({LEN_COL: '{:,.2f}', SCRAP_COL: '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}), use_container_width=True, hide_index=True)
-
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             scrap_detail = df_m.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
@@ -617,11 +660,8 @@ if uploaded_file is not None:
                     st.markdown("**2. Quality Grade Distribution (Usage vs. Production)**")
                     st.caption("100% Stacked Bar: Track how grading standards shift for specific production batches.")
                     
-                    # 🚀 CẬP NHẬT: NHÃN KÉP CHO TRỤC X ĐỂ KHÔNG MẤT DỮ LIỆU SẢN XUẤT
                     grade_agg_combo = df_trace_base.groupby(['Display_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     grade_agg_combo = grade_agg_combo.sort_values(['Display_Month', 'Time_Group'])
-                    
-                    # Tạo nhãn kết hợp: "Tháng sử dụng \n (Sản xuất: Tháng nào)"
                     grade_agg_combo['Combo_Label'] = grade_agg_combo['Display_Month'] + "\n(Prod: " + grade_agg_combo['Time_Group'] + ")"
                     grade_agg_combo.set_index('Combo_Label', inplace=True)
                     
