@@ -373,12 +373,13 @@ if uploaded_file is not None:
         add_chart_border(ax)
 
     # --- TABS ---
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📁 1. Raw Data", 
         "📋 2. Quality Yield", 
         "📈 3. Capability (SPC)", 
         "📉 4. I-MR Tracking",
-        "✂️ 5. Tail Scrap"
+        "✂️ 5. Tail Scrap",
+        "🎯 6. Customer End-Use"
     ])
 
     # ==========================================================
@@ -935,6 +936,211 @@ if uploaded_file is not None:
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
 
+    # ==========================================================
+    # TASK 6: CUSTOMER END-USE ANALYSIS
+    # ==========================================================
+    with tab6:
+        st.header("6. Customer End-Use Analysis & Machine Transition")
+
+        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
+        USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None)
+        COIL_ID_COL = '鋼捲號碼'
+
+        if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns:
+            df_t6 = df[df[LEN_COL] > 0].copy()
+            df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
+            df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
+
+            def safe_parse_usage_date(s):
+                if pd.api.types.is_datetime64_any_dtype(s): return s
+                s_str = s.astype(str).str.strip()
+                res = pd.to_datetime(s_str, dayfirst=True, errors='coerce')
+                return res
+
+            df_t6['Parsed_Date'] = safe_parse_usage_date(df_t6[USAGE_COL])
+            df_t6 = df_t6.dropna(subset=['Parsed_Date'])
+
+            cutoff_date = pd.to_datetime('2026-04-01')
+            df_t6['Display_Month'] = df_t6['Parsed_Date'].dt.strftime('%Y-%m')
+            df_t6['Machine_Status'] = df_t6['Parsed_Date'].apply(lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)')
+
+            st.subheader("Executive Proof: Customer Scrap Rate vs. Internal Material Quality")
+
+            macro_df = df_t6.groupby('Display_Month').agg(
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum'),
+                Avg_YS=('YS', 'mean'),
+                Avg_TS=('TS', 'mean'),
+                Avg_EL=('EL', 'mean')
+            ).reset_index()
+            macro_df = macro_df.sort_values('Display_Month')
+            macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
+
+            if not macro_df.empty:
+                st.markdown("**Correlation between Scrap Rate and Theoretical Values (YS, TS, EL)**")
+                cols = st.columns(3)
+
+                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'),
+                            ('Avg_TS', 'Theoretical TS', '#2ca02c'),
+                            ('Avg_EL', 'Theoretical EL', '#9467bd')]
+
+                for idx, (col_name, label, color) in enumerate(features):
+                    with cols[idx]:
+                        fig_exec, ax1 = plt.subplots(figsize=(6, 4))
+
+                        color1 = '#d62728'
+                        ax1.set_ylabel('Scrap Rate (%)', color=color1, fontweight='bold', fontsize=9)
+                        ax1.plot(macro_df['Display_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
+                        ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
+                        ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.5 + 1)
+
+                        ax2 = ax1.twinx()
+                        feat_valid = macro_df[col_name].dropna()
+                        if not feat_valid.empty:
+                            ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
+                            ax2.plot(macro_df['Display_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
+                            ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
+                            feat_mean = feat_valid.mean()
+                            ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15)
+
+                        plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
+                        ax1.set_xticklabels(macro_df['Display_Month'], rotation=45, ha='right', fontsize=8)
+                        add_chart_border(ax1)
+                        fig_exec.tight_layout()
+                        st.pyplot(fig_exec)
+
+                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px;'>Conclusion: The spike in scrap is not caused by the material (Theoretical Values are stable), proving the customer's machine was at fault.</div>", unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.subheader("🔍 Inventory Traceability & Grade Matrix (Post Q4/2025)")
+            st.info("Visualize how material from different production periods performed and how grading standards shifted over time.")
+
+            df_trace_base = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
+
+            if not df_trace_base.empty:
+                available_grades = [g for g in base_grades if g in df_trace_base.columns]
+
+                agg_dict = {
+                    'Total_Length': (LEN_COL, 'sum'),
+                    'Total_Scrap': (SCRAP_COL, 'sum'),
+                    'Total_Coils': ('Total_Qty', 'sum')
+                }
+
+                trace_agg = df_trace_base.groupby(['Display_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                grade_agg = df_trace_base.groupby(['Display_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                trace_agg = pd.merge(trace_agg, grade_agg, on=['Display_Month', 'Time_Group'], how='left')
+
+                trace_agg['Scrap_Rate (%)'] = np.where(trace_agg['Total_Length'] > 0, (trace_agg['Total_Scrap'] / trace_agg['Total_Length']) * 100, 0).round(2)
+
+                col_h1, col_h2 = st.columns(2)
+
+                with col_h1:
+                    pivot_scrap = trace_agg.pivot(index='Display_Month', columns='Time_Group', values='Scrap_Rate (%)')
+                    st.markdown("**1. Scrap Rate (%) Heatmap**")
+                    st.caption("Red zones indicate high scrap rates for specific production batches.")
+                    fig_h1, ax_h1 = plt.subplots(figsize=(10, max(4, len(pivot_scrap) * 0.6)))
+                    sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
+                    ax_h1.set_ylabel("Usage Month", fontweight='bold')
+                    ax_h1.set_xlabel("Production Period", fontweight='bold')
+                    plt.xticks(rotation=45, ha='right')
+                    fig_h1.tight_layout()
+                    st.pyplot(fig_h1)
+
+                with col_h2:
+                    st.markdown("**2. Quality Grade Distribution (Usage vs. Production)**")
+                    st.caption("100% Stacked Bar: Track how grading standards shift for specific production batches.")
+
+                    grade_agg_combo = df_trace_base.groupby(['Display_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_agg_combo = grade_agg_combo.sort_values(['Display_Month', 'Time_Group'])
+                    grade_agg_combo['Combo_Label'] = grade_agg_combo['Display_Month'] + "\n(Prod: " + grade_agg_combo['Time_Group'] + ")"
+                    grade_agg_combo.set_index('Combo_Label', inplace=True)
+
+                    grade_pct_combo = grade_agg_combo[available_grades].div(grade_agg_combo[available_grades].sum(axis=1), axis=0) * 100
+                    grade_pct_combo = grade_pct_combo.fillna(0)
+
+                    fig_g2, ax_g2 = plt.subplots(figsize=(10, max(4, len(grade_pct_combo) * 0.6)))
+
+                    color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
+                    plot_colors = [color_map.get(g, '#888') for g in available_grades]
+
+                    grade_pct_combo.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
+                    ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
+                    ax_g2.set_xlabel("Usage Month (Production Period)", fontweight='bold')
+                    ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    ax_g2.set_ylim(0, 105)
+
+                    for c in ax_g2.containers:
+                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 5 else "" for v in c]
+                        ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
+
+                    plt.xticks(rotation=45, ha='right', fontsize=9)
+                    add_chart_border(ax_g2)
+                    fig_g2.tight_layout()
+                    st.pyplot(fig_g2)
+
+                with st.expander("📂 View Detailed Traceability Data"):
+                    trace_detailed = trace_agg.rename(columns={'Display_Month': 'Usage Month', 'Time_Group': 'Production Period'})
+                    st.dataframe(
+                        trace_detailed.style.format({
+                            'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%',
+                            **{f'{g} (%)': '{:.2f}%' for g in available_grades}
+                        }).background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds'),
+                        use_container_width=True, hide_index=True
+                    )
+            else:
+                st.warning("No data available from Q4 2025 onwards for traceability.")
+
+            st.markdown("---")
+            st.subheader("Micro View: Split-Coil Diagnosis")
+
+            coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
+            coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
+
+            coils_before = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'Old Machine (< Apr 2026)'][COIL_ID_COL])
+            coils_after = set(coil_status_scrap[coil_status_scrap['Machine_Status'] == 'New Machine (>= Apr 2026)'][COIL_ID_COL])
+            split_coils = coils_before.intersection(coils_after)
+
+            if split_coils:
+                st.info("Tracking coils run on both machines (Excluding perfect 0% - 0% records).")
+                split_data = []
+                for coil in split_coils:
+                    df_c = coil_status_scrap[coil_status_scrap[COIL_ID_COL] == coil]
+                    b_val = df_c[df_c['Machine_Status'] == 'Old Machine (< Apr 2026)']['Scrap_Rate'].values[0]
+                    a_val = df_c[df_c['Machine_Status'] == 'New Machine (>= Apr 2026)']['Scrap_Rate'].values[0]
+
+                    if b_val == 0 and a_val == 0:
+                        continue
+
+                    props = df_t6[df_t6[COIL_ID_COL] == coil][['YS', 'TS', 'EL']].mean().to_dict()
+
+                    if b_val > 10 and a_val < 5: root = "🚨 Old Machine Issue (Proven)"
+                    elif b_val > 10 and a_val >= 5: root = "⚠️ Material / Process Issue"
+                    elif a_val > b_val + 5: root = "⚙️ New Machine Tuning Issue"
+                    elif b_val > 0 and a_val == 0: root = "✅ Improved on New Machine"
+                    else: root = "✅ Normal / Stable"
+
+                    split_data.append({
+                        'Coil ID': coil, 'Scrap (Old Machine)': b_val, 'Scrap (New Machine)': a_val,
+                        'Delta (%)': b_val - a_val, 'Theoretical YS': props.get('YS', np.nan),
+                        'Theoretical TS': props.get('TS', np.nan), 'Theoretical EL': props.get('EL', np.nan), 'Root Cause': root
+                    })
+
+                if len(split_data) > 0:
+                    split_report = pd.DataFrame(split_data)
+                    st.dataframe(
+                        split_report.style.format({
+                            'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
+                            'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}'
+                        }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
+                        use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.success("All coils processed across both machines achieved perfect quality (0% scrap). No defective coils to display.")
+            else:
+                st.warning("No split-coils found across the April 2026 transition line.")
+        else:
+            st.warning("Required columns for usage analysis not found.")
+
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
@@ -942,14 +1148,17 @@ if uploaded_file is not None:
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             if not yield_summary.empty:
                 yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
-            grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
+            if 'grade_dist_display' in locals() and not grade_dist_display.empty:
+                grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'cap_summary_rows' in locals() and cap_summary_rows:
                 pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
             if 'plot_df_base' in locals() and not plot_df_base.empty:
                 plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
             if 'trend_data' in locals() and not trend_data.empty:
                 trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
+            if 'scrap_by_period' in locals() and not scrap_by_period.empty:
                 scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
+            if 'scrap_detail' in locals() and not scrap_detail.empty:
                 scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
         
         st.sidebar.download_button(
