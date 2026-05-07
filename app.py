@@ -938,7 +938,7 @@ if uploaded_file is not None:
 
     # ==========================================================
 # ==========================================================
-    # ==========================================================
+# ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -946,13 +946,11 @@ if uploaded_file is not None:
         st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
 
         possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-        # Đã đổi df_global thành df
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
         COIL_ID_COL = '鋼捲號碼'
 
-        # Đã đổi df_global thành df
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            df_t6 = df[df[LEN_COL] > 0].copy() # Đã đổi df_global thành df
+            df_t6 = df[df[LEN_COL] > 0].copy() 
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
@@ -977,7 +975,7 @@ if uploaded_file is not None:
                     lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)'
                 )
 
-                # 3 & 4. Monthly Scrap & Material Stability Analysis (Scrap vs Material Property Correlation)
+                # 3 & 4. Monthly Scrap & Material Stability Analysis
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -1004,7 +1002,10 @@ if uploaded_file is not None:
                         ax1.set_ylabel('Scrap Rate (%)', color=color1, fontweight='bold', fontsize=9)
                         ax1.plot(macro_df['Usage_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
                         ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
-                        ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.35 + 1)
+                        
+                        # Fix potential ylim error if all scrap rates are 0
+                        max_scrap = macro_df['Scrap_Rate (%)'].max()
+                        ax1.set_ylim(-0.5, max_scrap * 1.35 + 1 if max_scrap > 0 else 5)
 
                         ax2 = ax1.twinx()
                         feat_valid = macro_df[col_name].dropna()
@@ -1013,7 +1014,8 @@ if uploaded_file is not None:
                             ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
                             ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
                             feat_mean = feat_valid.mean()
-                            ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
+                            if feat_mean > 0:
+                                ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
@@ -1024,6 +1026,7 @@ if uploaded_file is not None:
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
 
                 st.markdown("---")
+                
                 # 5 & 6. Production Date ↔ Usage Date Cross Analysis (Production vs Usage Quality Matrix)
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
@@ -1038,7 +1041,9 @@ if uploaded_file is not None:
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # Build Rich HTML Matrix
+                # ==========================================================
+                # SỬA LỖI: Build Rich HTML Matrix (Đã được nén thành chuỗi)
+                # ==========================================================
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
 
@@ -1049,25 +1054,22 @@ if uploaded_file is not None:
                     if rate < 10.0: return "#ffcdd2" # Light Red (Alert)
                     return "#e57373" # Deep Red (Danger)
 
-                html_matrix = f"""
-                <style>
-                .q-matrix {{ width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }}
-                .q-matrix th {{ background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }}
-                .q-matrix td {{ border: 1px solid #ccc; padding: 8px; vertical-align: top; width: {100 / (len(usage_months) + 1)}%; }}
-                .cell-title {{ font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}}
-                .grade-list {{ list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }}
-                .grade-list li {{ display: flex; justify-content: space-between; }}
-                .grade-name {{ font-weight: bold; color: #444; }}
-                </style>
-                <table class="q-matrix">
-                    <thead>
-                        <tr>
-                            <th>Production \\ Usage</th>
-                            {''.join([f'<th>{m}</th>' for m in usage_months])}
-                        </tr>
-                    </thead>
-                    <tbody>
-                """
+                html_matrix = (
+                    "<style>"
+                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }"
+                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }"
+                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }"
+                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}"
+                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }"
+                    ".grade-list li { display: flex; justify-content: space-between; }"
+                    ".grade-name { font-weight: bold; color: #444; }"
+                    "</style>"
+                    "<table class='q-matrix'>"
+                    "<thead><tr><th>Production \\ Usage</th>"
+                )
+                
+                html_matrix += "".join([f"<th>{m}</th>" for m in usage_months])
+                html_matrix += "</tr></thead><tbody>"
 
                 for prod in prod_periods:
                     html_matrix += f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>"
@@ -1089,12 +1091,8 @@ if uploaded_file is not None:
                                         color = "green" if "A" in g else "red"
                                         grade_html += f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>"
                             
-                            html_matrix += f"""
-                            <td style='background-color: {bg_color};'>
-                                <div class='cell-title'>Scrap: {scrap_rate:.1f}%</div>
-                                <ul class='grade-list'>{grade_html}</ul>
-                            </td>
-                            """
+                            html_matrix += f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{grade_html}</ul></td>"
+                            
                     html_matrix += "</tr>"
                 html_matrix += "</tbody></table>"
 
@@ -1102,6 +1100,7 @@ if uploaded_file is not None:
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
 
                 st.markdown("---")
+                
                 # 7 & 8. Standard Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
 
@@ -1145,6 +1144,7 @@ if uploaded_file is not None:
                     st.pyplot(fig_g2)
 
             st.markdown("---")
+            
             # 9 & 10. Split Coil Verification & Root Cause Classification
             st.subheader("9 & 10. Split Coil Verification (Strongest Evidence)")
             st.info("Identifying identical coils processed on both Old and New machines to isolate machine impact from material quality.")
