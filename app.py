@@ -645,6 +645,7 @@ if uploaded_file is not None:
             st.markdown("---")
 
     # ==========================================================
+# ==========================================================
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
     # ==========================================================
     with tab4:
@@ -716,9 +717,18 @@ if uploaded_file is not None:
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
                 
-                out_i = np.where((vals > ucl_i) | (vals < lcl_i))[0]
+                # Bắt lỗi vượt giới hạn (Thống kê + Kỹ thuật)
+                out_condition = (vals > ucl_i) | (vals < lcl_i)
+                
+                if usl is not None:
+                    out_condition = out_condition | (vals > usl)
+                if lsl is not None:
+                    out_condition = out_condition | (vals < lsl)
+
+                out_i = np.where(out_condition)[0]
+                
                 if len(out_i) > 0:
-                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50, label="Out of Control")
+                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50, label="Out of Bounds (UCL/LCL/Spec)")
                     
                 all_y_vals = [v for v in [np.max(vals), np.min(vals), ucl_i, lcl_i, usl, lsl] if v is not None]
                 y_max = max(all_y_vals) if all_y_vals else 10
