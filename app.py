@@ -12,7 +12,6 @@ st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
 # --- GLOBAL MATPLOTLIB CONFIGURATION FOR HIGH-RES EXPORT ---
-# Using savefig parameters instead of global figure.dpi to keep web UI fast while exports are high-res
 plt.rcParams['savefig.dpi'] = 300
 plt.rcParams['savefig.bbox'] = 'tight'
 plt.rcParams['font.size'] = 11
@@ -22,8 +21,13 @@ plt.rcParams['xtick.labelsize'] = 9
 plt.rcParams['ytick.labelsize'] = 9
 plt.rcParams['legend.fontsize'] = 9
 
-# --- CACHING & DOWNLOAD HELPER FUNCTIONS ---
+# --- GLOBAL CONSTANTS (FIX NAMERROR) ---
+base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
+LEN_COL = '實測長度'
+SCRAP_COL = '尾料剔退'
+COIL_ID_COL = '鋼捲號碼'
 
+# --- CACHING & DOWNLOAD HELPER FUNCTIONS ---
 @st.cache_data(show_spinner=False)
 def generate_table_image_bytes(df_target):
     """Generates a high-res table image and caches it in memory."""
@@ -48,14 +52,12 @@ def generate_table_image_bytes(df_target):
     the_table.set_fontsize(10)
     the_table.scale(1, 1.5)
     
-    # Format header
     for j, label in enumerate(df_str.columns):
         cell = the_table.get_celld()[(0, j)]
         cell.set_facecolor('#1a3a5c')
         cell.get_text().set_color('white')
         cell.get_text().set_weight('bold')
         
-    # Alternate row colors
     for i in range(1, len(df_display) + 1):
         for j in range(len(df_str.columns)):
             cell = the_table.get_celld()[(i, j)]
@@ -94,6 +96,21 @@ def render_download_img(fig_target, file_prefix, key):
         key=key
     )
 
+@st.cache_data
+def convert_df_to_csv(df_target):
+    return df_target.to_csv(index=False).encode('utf-8')
+
+def render_download_data(df_target, file_prefix, key):
+    if df_target is not None and not df_target.empty:
+        csv = convert_df_to_csv(df_target)
+        st.download_button(
+            label=f"💾 Download {file_prefix} Data (CSV)",
+            data=csv,
+            file_name=f"{file_prefix}.csv",
+            mime="text/csv",
+            key=key
+        )
+
 # --- DATA PROCESSING (CACHED) ---
 @st.cache_data(show_spinner="Processing Production Data...")
 def load_and_preprocess_data(file_bytes):
@@ -127,7 +144,6 @@ def load_and_preprocess_data(file_bytes):
     else:
         df['Time_Group'] = "Unknown"
 
-    base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = []
         for c in df.columns:
@@ -181,8 +197,6 @@ def load_and_preprocess_data(file_bytes):
         if f in df.columns:
             df[f] = pd.to_numeric(df[f], errors='coerce')
 
-    LEN_COL = '實測長度'
-    SCRAP_COL = '尾料剔退'
     if LEN_COL in df.columns:
         df[LEN_COL] = pd.to_numeric(df[LEN_COL], errors='coerce').fillna(0)
     if SCRAP_COL in df.columns:
@@ -483,7 +497,11 @@ if uploaded_file is not None:
             
         st.markdown("### Filtered Data Preview")
         st.dataframe(df.head(50), use_container_width=True)
-        render_table_as_img_download(df.head(50), "Filtered_Raw_Data", key="dl_img_raw_tbl")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            render_download_data(df.head(50), "Filtered_Raw", key="dl_csv_raw")
+        with col_r2:
+            render_table_as_img_download(df.head(50), "Filtered_Raw_Data", key="dl_img_raw_tbl")
 
     # ==========================================================
     # TASK 2: YIELD SUMMARY
@@ -516,7 +534,11 @@ if uploaded_file is not None:
                     }),
                 use_container_width=True, hide_index=True
             )
-            render_table_as_img_download(yield_summary, "Yield_Summary", key="dl_img_yield_tbl")
+            col2a, col2b = st.columns(2)
+            with col2a:
+                render_download_data(yield_summary, "Yield_Summary", key="dl_csv_yield")
+            with col2b:
+                render_table_as_img_download(yield_summary, "Yield_Summary", key="dl_img_yield_tbl")
         else:
             st.info("No yield data available to display in this view.")
 
@@ -566,7 +588,11 @@ if uploaded_file is not None:
         html += "</tbody></table>"
         
         st.markdown(html, unsafe_allow_html=True)
-        render_table_as_img_download(grade_dist_display.reset_index(), "Grade_Distribution", key="dl_img_grade_tbl")
+        col2c, col2d = st.columns(2)
+        with col2c:
+            render_download_data(grade_dist_display.reset_index(), "Grade_Distribution", key="dl_csv_grade")
+        with col2d:
+            render_table_as_img_download(grade_dist_display.reset_index(), "Grade_Distribution", key="dl_img_grade_tbl")
 
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
@@ -687,7 +713,11 @@ if uploaded_file is not None:
                 .format(fmt, na_rep='—'),
                 use_container_width=True, hide_index=True
             )
-            render_table_as_img_download(cap_df, "Capability_Log", key="dl_img_cap_tbl")
+            col3a, col3b = st.columns(2)
+            with col3a:
+                render_download_data(cap_df, "Capability_Log", key="dl_csv_cap")
+            with col3b:
+                render_table_as_img_download(cap_df, "Capability_Log", key="dl_img_cap_tbl")
             st.markdown("---")
 
         for period in ordered_periods:
@@ -784,15 +814,12 @@ if uploaded_file is not None:
                 
                 fig_imr, (ax_i, ax_mr) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
                 
-                # I-Chart
                 ax_i.plot(vals, marker='o', color='#1f77b4', linestyle='-', linewidth=1.5, markersize=5)
                 
-                # Statistical Control Limits
                 ax_i.axhline(mean_v, color='green', linestyle='--', label=f'Mean: {mean_v:.2f}')
                 ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
                 ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
                 
-                # User Input Specification Limits (USL/LSL/Target)
                 spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {}) if t4_thick != 'Overall' else {}
                 lsl = spec.get('min')
                 usl = spec.get('max')
@@ -805,7 +832,6 @@ if uploaded_file is not None:
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
                 
-                # Catch out-of-bounds errors (Statistical + Technical)
                 out_condition = (vals > ucl_i) | (vals < lcl_i)
                 
                 if usl is not None:
@@ -831,7 +857,6 @@ if uploaded_file is not None:
                 add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
                 
-                # MR-Chart
                 ax_mr.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', linestyle='-', linewidth=1.5, markersize=5)
                 ax_mr.axhline(mr_mean, color='green', linestyle='--', label=f'MR Mean: {mr_mean:.2f}')
                 ax_mr.axhline(ucl_mr, color='red', linestyle='--', label=f'UCL: {ucl_mr:.2f}')
@@ -853,7 +878,11 @@ if uploaded_file is not None:
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
                 
-                render_download_img(fig_imr, f"IMR_Chart_{t4_feat}_{t4_thick}", key=f"dl_img_imr_{t4_feat}")
+                col_i1, col_i2 = st.columns(2)
+                with col_i1:
+                    render_download_data(plot_df, f"IMR_Data_{t4_feat}_{t4_thick}", key=f"dl_csv_imr_{t4_feat}")
+                with col_i2:
+                    render_download_img(fig_imr, f"IMR_Chart_{t4_feat}_{t4_thick}", key=f"dl_img_imr_{t4_feat}")
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -861,8 +890,6 @@ if uploaded_file is not None:
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         
-        COIL_ID_COL = '鋼捲號碼'
-
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
@@ -930,7 +957,11 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
-            render_download_img(fig_trend, "Scrap_Trend", key="dl_img_trend")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                render_download_data(trend_data, "Scrap_Trend", key="dl_csv_trend")
+            with col_t2:
+                render_download_img(fig_trend, "Scrap_Trend", key="dl_img_trend")
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
@@ -971,7 +1002,11 @@ if uploaded_file is not None:
                 .format({'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
-            render_table_as_img_download(scrap_by_period, "Scrap_By_Period", key="dl_img_scrap_period_tbl")
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                render_download_data(scrap_by_period, "Scrap_By_Period", key="dl_csv_scrap_period")
+            with col_p2:
+                render_table_as_img_download(scrap_by_period, "Scrap_By_Period", key="dl_img_scrap_period_tbl")
 
             # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
@@ -1052,7 +1087,11 @@ if uploaded_file is not None:
                 .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
-            render_table_as_img_download(scrap_detail, "Scrap_Detailed", key="dl_img_scrap_detail_tbl")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                render_download_data(scrap_detail, "Scrap_Detailed", key="dl_csv_scrap_detail")
+            with col_d2:
+                render_table_as_img_download(scrap_detail, "Scrap_Detailed", key="dl_img_scrap_detail_tbl")
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
@@ -1066,7 +1105,6 @@ if uploaded_file is not None:
 
         possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
-        COIL_ID_COL = '鋼捲號碼'
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
             df_t6 = df[df[LEN_COL] > 0].copy() 
@@ -1146,7 +1184,11 @@ if uploaded_file is not None:
                         render_download_img(fig_exec, f"Scrap_vs_{col_name}", key=f"dl_img_exec_{col_name}")
 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
-                render_table_as_img_download(macro_df, "Monthly_Stability", key="dl_img_macro_tbl")
+                col_m1, col_m2 = st.columns(2)
+                with col_m1:
+                    render_download_data(macro_df, "Monthly_Stability", key="dl_csv_macro")
+                with col_m2:
+                    render_table_as_img_download(macro_df, "Monthly_Stability", key="dl_img_macro_tbl")
                 st.markdown("---")
                 
                 # 5 & 6. Production Date ↔ Usage Date Cross Analysis
@@ -1216,7 +1258,12 @@ if uploaded_file is not None:
 
                 st.markdown(html_matrix, unsafe_allow_html=True)
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
-                render_table_as_img_download(matrix_data, "Quality_Matrix", key="dl_img_matrix_tbl")
+                
+                col_mat1, col_mat2 = st.columns(2)
+                with col_mat1:
+                    render_download_data(matrix_data, "Quality_Matrix", key="dl_csv_matrix")
+                with col_mat2:
+                    render_table_as_img_download(matrix_data, "Quality_Matrix", key="dl_img_matrix_tbl")
 
                 st.markdown("---")
                 
@@ -1262,7 +1309,12 @@ if uploaded_file is not None:
                     add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
-                    render_download_img(fig_g2, "Usage_Grade_Dist", key="dl_img_g2")
+                    
+                    col_g2a, col_g2b = st.columns(2)
+                    with col_g2a:
+                        render_download_data(grade_pct_usage.reset_index(), "Usage_Grade_Dist", key="dl_csv_grade_pct")
+                    with col_g2b:
+                        render_download_img(fig_g2, "Usage_Grade_Dist", key="dl_img_g2")
 
             st.markdown("---")
             
@@ -1321,7 +1373,11 @@ if uploaded_file is not None:
                         }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
                         use_container_width=True, hide_index=True
                     )
-                    render_table_as_img_download(split_report, "Split_Coil_Verification", key="dl_img_split_tbl")
+                    col_split1, col_split2 = st.columns(2)
+                    with col_split1:
+                        render_download_data(split_report, "Split_Coil_Verification", key="dl_csv_split")
+                    with col_split2:
+                        render_table_as_img_download(split_report, "Split_Coil_Verification", key="dl_img_split_tbl")
                 else:
                     st.success("All multi-machine coils achieved perfect quality (0% scrap). No anomalies detected.")
             else:
