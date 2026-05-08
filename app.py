@@ -1149,7 +1149,7 @@ if uploaded_file is not None:
                     </style>
                 </head>
                 <body>
-                    <button class="btn-capture" onclick="takeSnapshot()">📸 TẢI ẢNH BẢNG MATRIX (PNG NÉT CAO ĐỂ DÁN BÁO CÁO)</button>
+                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart Image (PNG for Report Use)</button>
                     <div id="matrix-container" style="background: white; padding: 10px; display: inline-block;">
                         {matrix_html_str}
                     </div>
