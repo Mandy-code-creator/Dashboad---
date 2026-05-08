@@ -970,7 +970,7 @@ if uploaded_file is not None:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
             
     # ==========================================================
-    # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
+# TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
@@ -1021,6 +1021,21 @@ if uploaded_file is not None:
                 macro_df = macro_df.sort_values('Usage_Month')
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
 
+                # ==========================================
+                # CODE THÊM MỚI: HIỂN THỊ BẢNG DỮ LIỆU GỐC & TỔNG HỢP YPE
+                # ==========================================
+                with st.expander("🔍 KIỂM TRA DỮ LIỆU YPE BẤT THƯỜNG (Bấm để xem)"):
+                    st.markdown("**1. Bảng dữ liệu đã tổng hợp theo tháng (Dùng để vẽ biểu đồ):**")
+                    st.dataframe(macro_df[['Usage_Month', 'Avg_YPE', 'Avg_YS', 'Avg_TS', 'Avg_EL', 'Scrap_Rate (%)']], use_container_width=True)
+
+                    st.markdown("**2. Bảng dữ liệu gốc (Raw Data) chi tiết từng cuộn:**")
+                    if 'YPE' in df_t6.columns:
+                        raw_ype_cols = [COIL_ID_COL, 'Usage_Date', 'Usage_Month', 'Machine_Status', 'YPE', 'YS', 'TS', 'EL', LEN_COL, SCRAP_COL]
+                        st.dataframe(df_t6[raw_ype_cols].sort_values(by='YPE', ascending=False, na_position='last'), use_container_width=True)
+                    else:
+                        st.error("Cột 'YPE' không tồn tại trong tập dữ liệu gốc!")
+                # ==========================================
+
                 # Đổi layout sang 2 hàng, mỗi hàng 2 cột để chứa đủ 4 biểu đồ
                 row1_cols = st.columns(2)
                 row2_cols = st.columns(2)
@@ -1057,7 +1072,11 @@ if uploaded_file is not None:
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        add_chart_border(ax1) # Giả định hàm này đã được định nghĩa ở trên
+                        
+                        # Giả định add_chart_border đã được định nghĩa
+                        if 'add_chart_border' in globals():
+                            add_chart_border(ax1) 
+                            
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
 
@@ -1081,7 +1100,7 @@ if uploaded_file is not None:
                 
                 # Build Rich HTML Matrix (Bản vá lỗi hiển thị)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
-                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
+                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
 
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" # Empty
@@ -1175,7 +1194,8 @@ if uploaded_file is not None:
                         ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
                         
                     plt.xticks(rotation=45, ha='right')
-                    add_chart_border(ax_g2)
+                    if 'add_chart_border' in globals():
+                        add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
 
