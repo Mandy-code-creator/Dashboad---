@@ -993,7 +993,14 @@ with tab6:
                 # 1. Hien thi Matrix tren Web
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 available_grades = [g for g in base_grades if g in df_t6.columns]
-                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg({'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}).join(df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum()).reset_index()
+                
+                # ĐÃ SỬA LỖI KEYERROR Ở ĐÂY: Dùng cú pháp named aggregation chuẩn của Pandas
+                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(
+                    Total_Length=(LEN_COL, 'sum'), 
+                    Total_Scrap=(SCRAP_COL, 'sum'), 
+                    Total_Coils=(COIL_ID_COL, 'count')
+                ).join(df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum()).reset_index()
+                
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
                 matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
@@ -1016,20 +1023,15 @@ with tab6:
                 html.append("</tbody></table>")
                 st.markdown("".join(html), unsafe_allow_html=True)
 
-                # ==========================================================
-                # NÚT TẢI EXCEL (DÙNG RICH TEXT ĐỂ GIỮ NGUYÊN MÀU SẮC NHƯ WEB)
-                # ==========================================================
+                # 2. Nut tai Excel
                 import io
                 def create_excel():
                     output = io.BytesIO()
                     writer = pd.ExcelWriter(output, engine='xlsxwriter')
                     wb, ws = writer.book, writer.book.add_worksheet('Quality Matrix')
                     
-                    # 1. Định dạng Tiêu đề và viền
                     fmt_head = wb.add_format({'bold':True,'bg_color':'#1a3a5c','font_color':'white','border':1,'align':'center','valign':'vcenter'})
                     fmt_side = wb.add_format({'bold':True,'bg_color':'#f1f3f5','border':1,'align':'center','valign':'vcenter'})
-                    
-                    # 2. Định dạng màu nền cho các mức cảnh báo Scrap
                     bg_fmt = {
                         'safe': wb.add_format({'bg_color':'#e8f5e9','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
                         'warn': wb.add_format({'bg_color':'#fff3e0','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
@@ -1037,18 +1039,14 @@ with tab6:
                         'danger': wb.add_format({'bg_color':'#e57373','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
                         'nodata': wb.add_format({'bg_color':'#fafafa','border':1,'align':'center','valign':'vcenter','font_color':'#aaaaaa'})
                     }
-                    
-                    # 3. Định dạng màu chữ đa sắc (Rich Text) bên trong ô
                     bold_scrap = wb.add_format({'bold': True, 'font_size': 11})
-                    green_pct = wb.add_format({'bold': True, 'font_color': '#2e7d32'})  # Màu xanh lá đậm
-                    red_pct = wb.add_format({'bold': True, 'font_color': '#c62828'})    # Màu đỏ đậm
+                    green_pct = wb.add_format({'bold': True, 'font_color': '#2e7d32'})
+                    red_pct = wb.add_format({'bold': True, 'font_color': '#c62828'})
                     normal = wb.add_format({'font_size': 10})
                     
-                    # Ghi Tiêu đề
                     ws.write(0, 0, 'Production \\ Usage', fmt_head)
                     for c, m in enumerate(usage_months): ws.write(0, c+1, m, fmt_head)
 
-                    # Đổ dữ liệu
                     for r, prod in enumerate(prod_periods):
                         ws.write(r+1, 0, prod, fmt_side)
                         for c, usage in enumerate(usage_months):
@@ -1058,31 +1056,21 @@ with tab6:
                             else:
                                 sr = row['Scrap_Rate']
                                 cell_bg = bg_fmt['safe'] if sr < 2 else bg_fmt['warn'] if sr < 5 else bg_fmt['alert'] if sr < 10 else bg_fmt['danger']
-                                
-                                # Khởi tạo danh sách các khối chữ đa định dạng
                                 rich_text = [bold_scrap, f"Scrap: {sr:.1f}%\n"]
-                                
                                 for g in available_grades:
                                     if row.get(g,0) > 0:
                                         pct = int(row[g]/row.get('Total_Coils',1)*100)
                                         pct_color = green_pct if 'A' in g else red_pct
-                                        # Cách nhau ra bằng khoảng trắng cho cân đối
                                         rich_text.extend([normal, f"{g}:   ", pct_color, f"{pct}%\n"])
-                                
-                                # Xóa dấu xuống dòng bị thừa ở cuối
                                 if len(rich_text) > 2: rich_text[-1] = rich_text[-1].rstrip('\n')
                                 else: rich_text.extend([normal, ""])
-                                
-                                # Lệnh viết chữ đa định dạng thần thánh của Excel
                                 ws.write_rich_string(r+1, c+1, *rich_text, cell_bg)
                     
-                    # Mở rộng cột và hàng cho giống kích thước app
                     ws.set_column(0, 0, 20); ws.set_column(1, len(usage_months), 16); ws.set_default_row(75)
                     writer.close()
                     return output.getvalue()
 
                 st.download_button(label="📥 Tải Matrix về Excel (Giữ nguyên màu sắc chuẩn)", data=create_excel(), file_name="Quality_Matrix_Report.xlsx")
-                # ==========================================================
 
                 st.markdown("---")
                 col_h1, col_h2 = st.columns(2)
