@@ -1019,18 +1019,6 @@ if uploaded_file is not None:
                 
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
 
-                # KIỂM TRA DỮ LIỆU YPE BẤT THƯỜNG
-                with st.expander("🔍 KIỂM TRA DỮ LIỆU YPE BẤT THƯỜNG (Bấm để xem)"):
-                    st.markdown("**1. Bảng dữ liệu đã tổng hợp theo tháng (Dùng để vẽ biểu đồ):**")
-                    st.dataframe(macro_df[['Usage_Month', 'Avg_YPE', 'Avg_YS', 'Avg_TS', 'Avg_EL', 'Scrap_Rate (%)']], use_container_width=True)
-
-                    st.markdown("**2. Bảng dữ liệu gốc (Raw Data) chi tiết từng cuộn:**")
-                    if 'YPE' in df_t6.columns:
-                        raw_ype_cols = [COIL_ID_COL, 'Usage_Date', 'Usage_Month', 'Machine_Status', 'YPE', 'YS', 'TS', 'EL', LEN_COL, SCRAP_COL]
-                        st.dataframe(df_t6[raw_ype_cols].sort_values(by='YPE', ascending=False, na_position='last'), use_container_width=True)
-                    else:
-                        st.error("Cột 'YPE' không tồn tại trong tập dữ liệu gốc!")
-
                 row1_cols = st.columns(2)
                 row2_cols = st.columns(2)
                 cols = row1_cols + row2_cols 
@@ -1204,9 +1192,10 @@ if uploaded_file is not None:
             split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
             
             # Bỏ qua các cuộn có scrap = 0 ở cả 2 máy (như logic cũ)
-            split_pivot = split_pivot[(split_pivot[old_machine_col] > 0) | (split_pivot[new_machine_col] > 0)]
+            if old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
+                split_pivot = split_pivot[(split_pivot[old_machine_col] > 0) | (split_pivot[new_machine_col] > 0)]
             
-            if not split_pivot.empty:
+            if not split_pivot.empty and old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
                 split_pivot['Delta (%)'] = split_pivot[old_machine_col] - split_pivot[new_machine_col]
                 
                 # Logic phân loại bằng Vector
