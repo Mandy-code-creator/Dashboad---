@@ -989,40 +989,6 @@ with tab6:
             else:
                 df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= pd.to_datetime('2026-04-01'), 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
                 
-                st.subheader("Monthly Scrap & Material Stability Analysis")
-                macro_df = df_t6.groupby('Usage_Month').agg(Total_Length=(LEN_COL, 'sum'), Total_Scrap=(SCRAP_COL, 'sum'), Avg_YS=('YS', 'mean'), Avg_TS=('TS', 'mean'), Avg_EL=('EL', 'mean'), Avg_YPE=('YPE', 'mean')).reset_index().sort_values('Usage_Month')
-                macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
-
-                with st.expander("🔍 KIỂM TRA DỮ LIỆU YPE BẤT THƯỜNG (Bấm để xem)"):
-                    st.dataframe(macro_df[['Usage_Month', 'Avg_YPE', 'Avg_YS', 'Avg_TS', 'Avg_EL', 'Scrap_Rate (%)']], use_container_width=True)
-                    if 'YPE' in df_t6.columns: st.dataframe(df_t6[[COIL_ID_COL, 'Usage_Date', 'Usage_Month', 'Machine_Status', 'YPE', 'YS', 'TS', 'EL', LEN_COL, SCRAP_COL]].sort_values('YPE', ascending=False), use_container_width=True)
-
-                cols = st.columns(2) + st.columns(2)
-                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), ('Avg_TS', 'Theoretical TS', '#2ca02c'), ('Avg_EL', 'Theoretical EL', '#9467bd'), ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')]
-                for idx, (col_name, label, color) in enumerate(features):
-                    with cols[idx]:
-                        fig, ax1 = plt.subplots(figsize=(6, 4))
-                        ax1.plot(macro_df['Usage_Month'], macro_df['Scrap_Rate (%)'], color='#d62728', marker='o', lw=2, label='Scrap Rate')
-                        ax1.set_ylabel('Scrap Rate (%)', color='#d62728', weight='bold', fontsize=9)
-                        ax1.set_ylim(-0.5, macro_df['Scrap_Rate (%)'].max() * 1.35 + 1)
-                        ax1.tick_params(axis='y', labelcolor='#d62728', labelsize=8)
-
-                        if col_name in macro_df.columns and not macro_df[col_name].dropna().empty:
-                            ax2 = ax1.twinx()
-                            ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', ls='--', lw=2, alpha=0.8, label=label)
-                            ax2.set_ylabel(label, color=color, weight='bold', fontsize=9)
-                            ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
-                            vmin, vmax = macro_df[col_name].min(), macro_df[col_name].max()
-                            pad = (vmax - vmin) * 0.15 if vmax > vmin else vmin * 0.1
-                            ax2.set_ylim(vmin - pad, vmax + pad)
-
-                        plt.title(f"Scrap vs {label}", weight='bold', fontsize=10)
-                        ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        if 'add_chart_border' in globals(): add_chart_border(ax1)
-                        fig.tight_layout(); st.pyplot(fig); plt.close(fig)
-
-                st.markdown("---")
-                
                 # Matrix
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 available_grades = [g for g in base_grades if g in df_t6.columns]
@@ -1096,7 +1062,6 @@ with tab6:
                     st.dataframe(pivot.rename(columns=rename_dict).reset_index().style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old)', 'Scrap (New)'], cmap='Reds'), use_container_width=True, hide_index=True)
                 else: st.success("No anomalies detected across multi-machine coils.")
         else: st.error("Missing required columns for Task 6 Analysis.")
-            
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
