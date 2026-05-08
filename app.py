@@ -973,13 +973,13 @@ if uploaded_file is not None:
 # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
 # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
 # ==========================================================
-with tab6:
-    st.header("6. Customer End-Use Analysis & Machine Transition")
-    st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
-
-    possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-    USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
-    COIL_ID_COL = '鋼捲號碼'
+    with tab6:
+        st.header("6. Customer End-Use Analysis & Machine Transition")
+        st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
+    
+        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
+        USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
+        COIL_ID_COL = '鋼捲號碼'
 
     if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
         df_t6 = df[df[LEN_COL] > 0].copy() 
