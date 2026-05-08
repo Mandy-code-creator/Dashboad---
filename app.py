@@ -22,6 +22,33 @@ plt.rcParams['xtick.labelsize'] = 9
 plt.rcParams['ytick.labelsize'] = 9
 plt.rcParams['legend.fontsize'] = 9
 
+# --- DOWNLOAD HELPER FUNCTIONS ---
+@st.cache_data
+def convert_df_to_csv(df_target):
+    return df_target.to_csv(index=False).encode('utf-8')
+
+def render_download_data(df_target, file_prefix, key):
+    if df_target is not None and not df_target.empty:
+        csv = convert_df_to_csv(df_target)
+        st.download_button(
+            label=f"💾 Download {file_prefix} Data (CSV)",
+            data=csv,
+            file_name=f"{file_prefix}.csv",
+            mime="text/csv",
+            key=key
+        )
+
+def render_download_img(fig_target, file_prefix, key):
+    img_buffer = io.BytesIO()
+    fig_target.savefig(img_buffer, format="png", dpi=300, bbox_inches='tight')
+    st.download_button(
+        label=f"📥 Download {file_prefix} Chart (PNG)",
+        data=img_buffer.getvalue(),
+        file_name=f"{file_prefix}.png",
+        mime="image/png",
+        key=key
+    )
+
 # --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT PER THICKNESS ---
 st.sidebar.header("⚙️ Spec Limits (Control)")
 st.sidebar.info("Limits apply from Q4 2025 onwards. Configured per Thickness.")
@@ -413,6 +440,7 @@ if uploaded_file is not None:
             
         st.markdown("### Filtered Data Preview")
         st.dataframe(df.head(50), use_container_width=True)
+        render_download_data(df, "Filtered_Raw", key="dl_raw_data")
 
     # ==========================================================
     # TASK 2: YIELD SUMMARY
@@ -445,6 +473,7 @@ if uploaded_file is not None:
                     }),
                 use_container_width=True, hide_index=True
             )
+            render_download_data(yield_summary, "Yield_Summary", key="dl_yield_summary")
         else:
             st.info("No yield data available to display in this view.")
 
@@ -494,6 +523,7 @@ if uploaded_file is not None:
         html += "</tbody></table>"
         
         st.markdown(html, unsafe_allow_html=True)
+        render_download_data(grade_dist_display.reset_index(), "Grade_Distribution", key="dl_grade_dist")
 
         st.markdown("**📈 Grade Distribution Chart**")
         fig_g, ax_g = plt.subplots(figsize=(12, 5))
@@ -515,6 +545,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_g.tight_layout()
             st.pyplot(fig_g)
+            render_download_img(fig_g, "Grade_Distribution", key="dl_fig_g")
 
         st.markdown("---")
         st.subheader("Charts by Period & Thickness")
@@ -538,6 +569,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_y.tight_layout()
             st.pyplot(fig_y)
+            render_download_img(fig_y, "Yield_By_Thickness", key="dl_fig_y")
             
         with col_c2:
             st.markdown("**Defect Rate (%) by Period & Thickness**")
@@ -559,6 +591,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_d.tight_layout()
             st.pyplot(fig_d)
+            render_download_img(fig_d, "Defect_By_Thickness", key="dl_fig_d")
 
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
@@ -611,6 +644,7 @@ if uploaded_file is not None:
                 .format(fmt, na_rep='—'),
                 use_container_width=True, hide_index=True
             )
+            render_download_data(cap_df, "Capability_Log", key="dl_cap_log")
             st.markdown("---")
 
         for period in ordered_periods:
@@ -633,6 +667,7 @@ if uploaded_file is not None:
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
+                    render_download_img(fig, f"SPC_{f}_Overall_{period}", key=f"dl_spc_ov_{f}_{period}")
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -652,6 +687,7 @@ if uploaded_file is not None:
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
+                        render_download_img(fig, f"SPC_{f}_{thick}mm_{period}", key=f"dl_spc_th_{f}_{thick}_{period}")
             st.markdown("---")
 
     # ==========================================================
@@ -774,16 +810,11 @@ if uploaded_file is not None:
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
                 
-                # --- High-Res Download Button ---
-                img_buffer_imr = io.BytesIO()
-                fig_imr.savefig(img_buffer_imr, format="png")
-                st.download_button(
-                    label=f"📥 Download High-Res I-MR Chart ({t4_feat})",
-                    data=img_buffer_imr.getvalue(),
-                    file_name=f"IMR_Chart_{t4_feat}_{t4_thick}mm.png",
-                    mime="image/png",
-                    key=f"download_imr_{t4_feat}"
-                )
+                col_i1, col_i2 = st.columns(2)
+                with col_i1:
+                    render_download_data(plot_df, f"IMR_Data_{t4_feat}_{t4_thick}", key=f"dl_imr_csv_{t4_feat}")
+                with col_i2:
+                    render_download_img(fig_imr, f"IMR_Chart_{t4_feat}_{t4_thick}", key=f"dl_imr_img_{t4_feat}")
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -794,9 +825,7 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            # Remove full-year summary row to prevent chart noise
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
-            
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
             missing_mask = df_t5[COIL_ID_COL].isna()
@@ -863,15 +892,11 @@ if uploaded_file is not None:
                 
             st.pyplot(fig_trend)
             
-            # --- High-Res Download Button ---
-            img_buffer_trend = io.BytesIO()
-            fig_trend.savefig(img_buffer_trend, format="png")
-            st.download_button(
-                label="📥 Download High-Res Trend Chart",
-                data=img_buffer_trend.getvalue(),
-                file_name="Rejection_Rate_Trend.png",
-                mime="image/png"
-            )
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                render_download_data(trend_data, "Scrap_Trend", key="dl_trend_data")
+            with col_t2:
+                render_download_img(fig_trend, "Scrap_Trend", key="dl_fig_trend")
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
@@ -905,18 +930,19 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_p.tight_layout()
             st.pyplot(fig_p)
+            render_download_img(fig_p, "Scrap_By_Period", key="dl_fig_p")
 
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
                 .format({'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
+            render_download_data(scrap_by_period, "Scrap_By_Period", key="dl_scrap_period_data")
 
             # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             
-            # Initialize base detail table (For final display)
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
@@ -932,7 +958,6 @@ if uploaded_file is not None:
                 st.markdown("**Scrap Rate by Period & Thickness**")
                 fig_t, ax_t = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    # Aggregate total Length and Scrap by Thickness first, then calculate %
                     thick_agg = scrap_detail.groupby(['Time_Group', 'Actual_Thickness']).agg(
                         T_Len=('Total_Length', 'sum'),
                         T_Scrap=('Total_Scrap', 'sum')
@@ -955,12 +980,12 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_t.tight_layout()
                 st.pyplot(fig_t)
+                render_download_img(fig_t, "Scrap_By_Thickness", key="dl_fig_t")
 
             with col_m:
                 st.markdown("**Scrap Rate by Period & Material**")
                 fig_m, ax_m = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    # Aggregate total Length and Scrap by Material first, then calculate %
                     mat_agg = scrap_detail.groupby(['Time_Group', 'HR_Material']).agg(
                         M_Len=('Total_Length', 'sum'),
                         M_Scrap=('Total_Scrap', 'sum')
@@ -983,6 +1008,7 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
+                render_download_img(fig_m, "Scrap_By_Material", key="dl_fig_m")
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
             scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
@@ -992,6 +1018,7 @@ if uploaded_file is not None:
                 .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
                 use_container_width=True, hide_index=True
             )
+            render_download_data(scrap_detail, "Scrap_Detailed", key="dl_scrap_detail_data")
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
@@ -1021,19 +1048,16 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            # Filter data from Q4/2025 onwards as requested
             df_t6 = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
             if df_t6.empty:
                 st.warning("No usage data available for materials produced from Q4/2025 onwards.")
             else:
-                # 2. Machine Transition Classification
                 cutoff_date = pd.to_datetime('2026-04-01')
                 df_t6['Machine_Status'] = df_t6['Usage_Date'].apply(
                     lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)'
                 )
 
-                # 3 & 4. Monthly Scrap & Material Stability Analysis
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -1043,12 +1067,11 @@ if uploaded_file is not None:
                     Avg_YS=('YS', 'mean'),
                     Avg_TS=('TS', 'mean'),
                     Avg_EL=('EL', 'mean'),
-                    Avg_YPE=('YPE', 'mean') # Add YPE aggregation
+                    Avg_YPE=('YPE', 'mean') 
                 ).reset_index()
                 macro_df = macro_df.sort_values('Usage_Month')
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
 
-                # Change layout to 2 rows, 2 columns each to fit 4 charts
                 row1_cols = st.columns(2)
                 row2_cols = st.columns(2)
                 cols = row1_cols + row2_cols 
@@ -1056,7 +1079,7 @@ if uploaded_file is not None:
                 features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
                             ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
                             ('Avg_EL', 'Theoretical EL', '#9467bd'),
-                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')] # Add YPE chart configuration
+                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')] 
 
                 for idx, (col_name, label, color) in enumerate(features):
                     with cols[idx]:
@@ -1071,7 +1094,6 @@ if uploaded_file is not None:
                         ax1.set_ylim(-0.5, max_scrap * 1.35 + 1 if max_scrap > 0 else 5)
 
                         ax2 = ax1.twinx()
-                        # Handle case where YPE column is missing
                         if col_name in macro_df.columns:
                             feat_valid = macro_df[col_name].dropna()
                             if not feat_valid.empty:
@@ -1084,21 +1106,21 @@ if uploaded_file is not None:
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        add_chart_border(ax1) # Assuming this function is defined above
+                        add_chart_border(ax1) 
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
+                        render_download_img(fig_exec, f"Scrap_vs_{col_name}", key=f"dl_fig_exec_{col_name}")
 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
-
+                render_download_data(macro_df, "Monthly_Stability", key="dl_macro_data")
                 st.markdown("---")
                 
-                # 5 & 6. Production Date ↔ Usage Date Cross Analysis (Production vs Usage Quality Matrix)
+                # 5 & 6. Production Date ↔ Usage Date Cross Analysis
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
                 available_grades = [g for g in base_grades if g in df_t6.columns]
                 
-                # Aggregate for Matrix
                 agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
                 matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
@@ -1106,16 +1128,15 @@ if uploaded_file is not None:
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # Build Rich HTML Matrix
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
 
                 def get_color(rate):
-                    if pd.isna(rate): return "#ffffff" # Empty
-                    if rate < 2.0: return "#e8f5e9" # Greenish (Safe)
-                    if rate < 5.0: return "#fff3e0" # Yellowish (Warning)
-                    if rate < 10.0: return "#ffcdd2" # Light Red (Alert)
-                    return "#e57373" # Deep Red (Danger)
+                    if pd.isna(rate): return "#ffffff" 
+                    if rate < 2.0: return "#e8f5e9" 
+                    if rate < 5.0: return "#fff3e0" 
+                    if rate < 10.0: return "#ffcdd2" 
+                    return "#e57373" 
 
                 html_matrix = (
                     "<style>"
@@ -1161,6 +1182,7 @@ if uploaded_file is not None:
 
                 st.markdown(html_matrix, unsafe_allow_html=True)
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
+                render_download_data(matrix_data, "Quality_Matrix", key="dl_matrix_data")
 
                 st.markdown("---")
                 
@@ -1178,16 +1200,7 @@ if uploaded_file is not None:
                     plt.xticks(rotation=45, ha='right')
                     fig_h1.tight_layout()
                     st.pyplot(fig_h1)
-                    
-                    # --- High-Res Download Button ---
-                    img_buffer_h1 = io.BytesIO()
-                    fig_h1.savefig(img_buffer_h1, format="png")
-                    st.download_button(
-                        label="📥 Download High-Res Heatmap",
-                        data=img_buffer_h1.getvalue(),
-                        file_name="Scrap_Heatmap.png",
-                        mime="image/png"
-                    )
+                    render_download_img(fig_h1, "Scrap_Heatmap", key="dl_fig_h1")
 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
@@ -1215,6 +1228,12 @@ if uploaded_file is not None:
                     add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
+                    
+                    col_g2a, col_g2b = st.columns(2)
+                    with col_g2a:
+                        render_download_data(grade_pct_usage.reset_index(), "Usage_Grade_Dist", key="dl_grade_pct_data")
+                    with col_g2b:
+                        render_download_img(fig_g2, "Usage_Grade_Dist", key="dl_fig_g2")
 
             st.markdown("---")
             
@@ -1238,11 +1257,9 @@ if uploaded_file is not None:
                     
                     if old_val == 0 and new_val == 0: continue
                     
-                    # Get YPE property
                     props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
                     props = df_t6[df_t6[COIL_ID_COL] == coil][props_cols].mean().to_dict()
                     
-                    # Root Cause Classification Logic
                     if old_val > 10 and new_val < 5: 
                         root = "🚨 Old Machine Issue (Proven)"
                     elif old_val > 10 and new_val >= 5: 
@@ -1262,7 +1279,7 @@ if uploaded_file is not None:
                         'Theoretical YS': props.get('YS', np.nan),
                         'Theoretical TS': props.get('TS', np.nan), 
                         'Theoretical EL': props.get('EL', np.nan),
-                        'Theoretical YPE': props.get('YPE', np.nan), # Add YPE to table
+                        'Theoretical YPE': props.get('YPE', np.nan), 
                         'Root Cause Classification': root
                     })
                     
@@ -1275,6 +1292,7 @@ if uploaded_file is not None:
                         }).background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
                         use_container_width=True, hide_index=True
                     )
+                    render_download_data(split_report, "Split_Coil_Verification", key="dl_split_data")
                 else:
                     st.success("All multi-machine coils achieved perfect quality (0% scrap). No anomalies detected.")
             else:
