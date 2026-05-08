@@ -1049,7 +1049,14 @@ if uploaded_file is not None:
                                 ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
                                 feat_mean = feat_valid.mean()
                                 if feat_mean > 0:
-                                    ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
+                                    if col_name == 'Avg_YPE':
+                                        # Mở khóa trục Y cho YPE: Lấy theo Min/Max thực tế + biên độ 20%
+                                        ymin, ymax = feat_valid.min(), feat_valid.max()
+                                        margin = (ymax - ymin) * 0.2 if ymax > ymin else 0.5
+                                        ax2.set_ylim(max(0, ymin - margin), ymax + margin)
+                                    else:
+                                        # Vẫn giữ nguyên ép khung +-15% cho YS, TS, EL
+                                        ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
