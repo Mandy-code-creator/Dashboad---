@@ -974,273 +974,132 @@ if uploaded_file is not None:
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
+        st.info("Evaluating material stability vs. machine impact.")
 
-        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-        USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
+        USAGE_COL = next((c for c in ['使用日期', '使用月份', 'Usage Date', 'Usage Month'] if c in df.columns), None) 
         COIL_ID_COL = '鋼捲號碼'
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            df_t6 = df[df[LEN_COL] > 0].copy() 
+            df_t6 = df[(df[LEN_COL] > 0) & (df['Production_Date'] >= pd.Timestamp(2025, 10, 1))].copy()
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
-            df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
-
-            # Tối ưu 1: Parse ngày tháng bằng vectorized thay vì custom function
-            if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
-                df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
-            else:
-                df_t6['Usage_Date'] = df_t6[USAGE_COL]
-
+            df_t6 = df_t6.dropna(subset=[USAGE_COL])
+            df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            # Tách riêng dữ liệu từ Q4/2025 trở đi theo yêu cầu
-            df_t6 = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
-
-            if df_t6.empty:
-                st.warning("No usage data available for materials produced from Q4/2025 onwards.")
+            if df_t6.empty: 
+                st.warning("No usage data available.")
             else:
-                # 2. Machine Transition Classification (Vectorized numpy where is faster than apply)
-                cutoff_date = pd.to_datetime('2026-04-01')
-                df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
-
-                # 3 & 4. Monthly Scrap & Material Stability Analysis
-                st.subheader("Monthly Scrap & Material Stability Analysis")
-                st.caption("Verifying if the spike in scrap correlates with material instability.")
-
-                macro_df = df_t6.groupby('Usage_Month').agg(
-                    Total_Length=(LEN_COL, 'sum'), 
-                    Total_Scrap=(SCRAP_COL, 'sum'),
-                    Avg_YS=('YS', 'mean'),
-                    Avg_TS=('TS', 'mean'),
-                    Avg_EL=('EL', 'mean'),
-                    Avg_YPE=('YPE', 'mean')
-                ).reset_index().sort_values('Usage_Month')
+                df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= pd.to_datetime('2026-04-01'), 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
                 
-                macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
-
-                row1_cols = st.columns(2)
-                row2_cols = st.columns(2)
-                cols = row1_cols + row2_cols 
-                
-                features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
-                            ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
-                            ('Avg_EL', 'Theoretical EL', '#9467bd'),
-                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')]
-
-                for idx, (col_name, label, color) in enumerate(features):
-                    with cols[idx]:
-                        fig_exec, ax1 = plt.subplots(figsize=(6, 4))
-                        color1 = '#d62728' 
-                        ax1.set_ylabel('Scrap Rate (%)', color=color1, fontweight='bold', fontsize=9)
-                        ax1.plot(macro_df['Usage_Month'], macro_df['Scrap_Rate (%)'], color=color1, marker='o', linewidth=2, label='Scrap Rate')
-                        ax1.tick_params(axis='y', labelcolor=color1, labelsize=8)
-                        
-                        max_scrap = macro_df['Scrap_Rate (%)'].max()
-                        ax1.set_ylim(-0.5, max_scrap * 1.35 + 1 if max_scrap > 0 else 5)
-
-                        ax2 = ax1.twinx()
-                        if col_name in macro_df.columns:
-                            feat_valid = macro_df[col_name].dropna()
-                            if not feat_valid.empty:
-                                ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
-                                ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
-                                ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
-                                feat_min, feat_max = feat_valid.min(), feat_valid.max()
-                                padding = (feat_max - feat_min) * 0.15 if feat_max > feat_min else feat_min * 0.1
-                                ax2.set_ylim(feat_min - padding, feat_max + padding)
-
-                        plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
-                        ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        
-                        if 'add_chart_border' in globals():
-                            add_chart_border(ax1) 
-                            
-                        fig_exec.tight_layout()
-                        st.pyplot(fig_exec)
-                        plt.close(fig_exec) # Tối ưu 4: Giải phóng bộ nhớ matplotlib
-
-                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
-                st.markdown("---")
-                
-                # 5 & 6. Production vs Usage Quality Matrix
+                # 1. Hien thi Matrix tren Web
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
-                st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
-
                 available_grades = [g for g in base_grades if g in df_t6.columns]
-                
-                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
-                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
-                matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
-
+                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg({'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}).join(df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum()).reset_index()
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
+                matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
 
-                def get_color(rate):
-                    if pd.isna(rate): return "#ffffff" 
-                    if rate < 2.0: return "#e8f5e9" 
-                    if rate < 5.0: return "#fff3e0" 
-                    if rate < 10.0: return "#ffcdd2" 
-                    return "#e57373" 
-
-                # Tối ưu 2: Dùng Dict tra cứu O(1) thay cho filter dataframe trong vòng lặp kép
-                matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
-
-                html_parts = [
-                    "<style>",
-                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
-                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
-                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
-                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
-                    ".grade-list li { display: flex; justify-content: space-between; }",
-                    ".grade-name { font-weight: bold; color: #444; }",
-                    "</style>",
-                    "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
-                ]
-                html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                html_parts.append("</tr></thead><tbody>")
-
+                html = ["<style>.q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; } .q-matrix th { background: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; } .q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; } .cell-title { font-size: 13px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;} .grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.3; } .grade-list li { display: flex; justify-content: space-between; } .grade-name { font-weight: bold; color: #444; }</style><table class='q-matrix'><thead><tr><th>Production \\ Usage</th>" + "".join([f"<th>{m}</th>" for m in usage_months]) + "</tr></thead><tbody>"]
+                
                 for prod in prod_periods:
-                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
+                    html.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
-                        if not row:
-                            html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                        if not row: html.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
                         else:
-                            scrap_rate = row['Scrap_Rate']
-                            bg_color = get_color(scrap_rate)
-                            
-                            grade_html = []
-                            total_coils = row.get('Total_Coils', 0)
-                            if total_coils > 0:
+                            sr = row['Scrap_Rate']
+                            bg = "#e8f5e9" if sr < 2 else "#fff3e0" if sr < 5 else "#ffcdd2" if sr < 10 else "#e57373"
+                            grades = "".join([f"<li><span class='grade-name'>{g}:</span> <span style='color:{'green' if 'A' in g else 'red'}'>{row.get(g,0)/row.get('Total_Coils',1)*100:.0f}%</span></li>" for g in available_grades if row.get(g,0) > 0])
+                            html.append(f"<td style='background-color: {bg};'><div class='cell-title'>Scrap: {sr:.1f}%</div><ul class='grade-list'>{grades}</ul></td>")
+                    html.append("</tr>")
+                html.append("</tbody></table>")
+                st.markdown("".join(html), unsafe_allow_html=True)
+
+                # 2. Nut tai Excel (Giu nguyen mau sac)
+                import io
+                def create_excel():
+                    output = io.BytesIO()
+                    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+                    wb, ws = writer.book, writer.book.add_worksheet('Quality Matrix')
+                    
+                    # Formats
+                    fmt_head = wb.add_format({'bold':True,'bg_color':'#1a3a5c','font_color':'white','border':1,'align':'center','valign':'vcenter'})
+                    fmt_side = wb.add_format({'bold':True,'bg_color':'#f1f3f5','border':1,'align':'center','valign':'vcenter'})
+                    
+                    ws.write(0, 0, 'Production \\ Usage', fmt_head)
+                    for c, m in enumerate(usage_months): ws.write(0, c+1, m, fmt_head)
+
+                    for r, prod in enumerate(prod_periods):
+                        ws.write(r+1, 0, prod, fmt_side)
+                        for c, usage in enumerate(usage_months):
+                            row = matrix_dict.get((prod, usage))
+                            if not row: ws.write(r+1, c+1, "No Data", wb.add_format({'border':1,'align':'center','font_color':'#ccc'}))
+                            else:
+                                sr = row['Scrap_Rate']
+                                bg = "#e8f5e9" if sr < 2 else "#fff3e0" if sr < 5 else "#ffcdd2" if sr < 10 else "#e57373"
+                                txt = f"Scrap: {sr:.1f}%"
                                 for g in available_grades:
-                                    g_pct = (row.get(g, 0) / total_coils * 100)
-                                    if g_pct > 0:
-                                        color = "green" if "A" in g else "red"
-                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                            
-                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
-                    html_parts.append("</tr>")
-                html_parts.append("</tbody></table>")
+                                    if row.get(g,0) > 0: txt += f"\n{g}: {int(row[g]/row['Total_Coils']*100)}%"
+                                
+                                cell_fmt = wb.add_format({'bg_color':bg,'border':1,'text_wrap':True,'valign':'top','font_size':9})
+                                ws.write(r+1, c+1, txt, cell_fmt)
+                    
+                    ws.set_column(0, 0, 20); ws.set_column(1, len(usage_months), 18); ws.set_default_row(65)
+                    writer.close()
+                    return output.getvalue()
 
-                st.markdown("".join(html_parts), unsafe_allow_html=True)
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
+                st.download_button(label="📥 Tải Matrix về Excel (Bản nét cao - Giữ màu)", data=create_excel(), file_name="Quality_Matrix_Report.xlsx")
+
                 st.markdown("---")
-                
-                # 7 & 8. Standard Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
-
                 with col_h1:
                     st.subheader("7. Scrap Heatmap")
-                    st.caption("Identifying abnormal batches and transition impacts.")
-                    pivot_scrap = matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate')
-                    fig_h1, ax_h1 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6)))
-                    sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
-                    ax_h1.set_ylabel("Usage Month", fontweight='bold')
-                    ax_h1.set_xlabel("Production Period", fontweight='bold')
-                    plt.xticks(rotation=45, ha='right')
-                    fig_h1.tight_layout()
-                    st.pyplot(fig_h1)
-                    plt.close(fig_h1) # Giải phóng bộ nhớ
+                    fig, ax = plt.subplots(figsize=(8, max(4, len(prod_periods) * 0.6)))
+                    sns.heatmap(matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate'), annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax)
+                    ax.set_ylabel("Usage Month", weight='bold'); ax.set_xlabel("Production Period", weight='bold'); plt.xticks(rotation=45, ha='right')
+                    fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
-                    st.caption("Tracking customer grade structure before and after machine transition.")
-                    grade_agg_usage = df_t6.groupby('Usage_Month')[available_grades].sum()
-                    grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
-                    grade_pct_usage = grade_pct_usage.fillna(0)
-                    
-                    fig_g2, ax_g2 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6))) 
-                    color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
-                    plot_colors = [color_map.get(g, '#888') for g in available_grades]
-                    
-                    grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
-                    ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
-                    ax_g2.set_xlabel("Usage Month", fontweight='bold')
-                    ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    ax_g2.set_ylim(0, 105)
-                    
-                    for c in ax_g2.containers:
-                        labels = [f"{v.get_height():.0f}%" if v.get_height() > 5 else "" for v in c]
-                        ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
-                        
-                    plt.xticks(rotation=45, ha='right')
-                    if 'add_chart_border' in globals():
-                        add_chart_border(ax_g2)
-                    fig_g2.tight_layout()
-                    st.pyplot(fig_g2)
-                    plt.close(fig_g2) # Giải phóng bộ nhớ
+                    grade_pct = df_t6.groupby('Usage_Month')[available_grades].sum()
+                    grade_pct = (grade_pct.div(grade_pct.sum(axis=1), axis=0) * 100).fillna(0)
+                    fig, ax = plt.subplots(figsize=(8, max(4, len(prod_periods) * 0.6)))
+                    colors = [{'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}.get(g, '#888') for g in available_grades]
+                    grade_pct.plot(kind='bar', stacked=True, ax=ax, color=colors, width=0.8, edgecolor='white')
+                    ax.set_ylabel("Percentage (%)", weight='bold'); ax.set_xlabel("Usage Month", weight='bold'); ax.set_ylim(0, 105)
+                    ax.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+                    for c in ax.containers: ax.bar_label(c, labels=[f"{v.get_height():.0f}%" if v.get_height() > 5 else "" for v in c], label_type='center', color='white', weight='bold', fontsize=9)
+                    plt.xticks(rotation=45, ha='right'); 
+                    if 'add_chart_border' in globals(): add_chart_border(ax)
+                    fig.tight_layout(); st.pyplot(fig); plt.close(fig)
 
-            st.markdown("---")
-            
-            # 9 & 10. Split Coil Verification & Root Cause Classification
-            st.subheader("9 & 10. Split Coil Verification (Strongest Evidence)")
-            st.info("Identifying identical coils processed on both Old and New machines to isolate machine impact from material quality.")
-
-            # Tối ưu 3: Vectorized Split Coils logic (Loại bỏ hoàn toàn vòng lặp FOR)
-            coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
-            coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
-            
-            old_machine_col = 'Old Machine (< Apr 2026)'
-            new_machine_col = 'New Machine (>= Apr 2026)'
-            
-            # Khởi tạo Pivot để gộp scrap 2 máy trên cùng 1 hàng. Dùng dropna() để giữ lại cuộn có dùng ở cả 2 máy.
-            split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
-            
-            # Bỏ qua các cuộn có scrap = 0 ở cả 2 máy (như logic cũ)
-            if old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
-                split_pivot = split_pivot[(split_pivot[old_machine_col] > 0) | (split_pivot[new_machine_col] > 0)]
-            
-            if not split_pivot.empty and old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
-                split_pivot['Delta (%)'] = split_pivot[old_machine_col] - split_pivot[new_machine_col]
+                st.markdown("---")
+                st.subheader("9 & 10. Split Coil Verification (Strongest Evidence)")
+                coil_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
+                coil_scrap['Scrap_Rate'] = np.where(coil_scrap[LEN_COL] > 0, (coil_scrap[SCRAP_COL] / coil_scrap[LEN_COL]) * 100, 0)
+                pivot = coil_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
                 
-                # Logic phân loại bằng Vector
-                conds = [
-                    (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] < 5),
-                    (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] >= 5),
-                    (split_pivot[new_machine_col] > split_pivot[old_machine_col] + 5),
-                    (split_pivot[old_machine_col] > 0) & (split_pivot[new_machine_col] == 0)
-                ]
-                choices = [
-                    "🚨 Old Machine Issue (Proven)",
-                    "⚠️ Material / Process Issue",
-                    "⚙️ New Machine Tuning Issue",
-                    "✅ Improved on New Machine"
-                ]
-                split_pivot['Root Cause Classification'] = np.select(conds, choices, default="✅ Normal / Stable")
-                
-                # Nối thuộc tính YS/TS/EL/YPE
-                props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
-                if props_cols:
-                    coil_props = df_t6[df_t6[COIL_ID_COL].isin(split_pivot.index)].groupby(COIL_ID_COL)[props_cols].mean()
-                    split_pivot = split_pivot.join(coil_props)
-                
-                # Đổi tên cột chuẩn bị hiển thị
-                rename_dict = {
-                    old_machine_col: 'Scrap (Old Machine)', 
-                    new_machine_col: 'Scrap (New Machine)',
-                    'YS': 'Theoretical YS', 'TS': 'Theoretical TS', 
-                    'EL': 'Theoretical EL', 'YPE': 'Theoretical YPE'
-                }
-                split_report = split_pivot.rename(columns=rename_dict).reset_index()
-                
-                # Cấu trúc hiển thị bảng
-                format_dict = {
-                    'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
-                    'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}', 'Theoretical YPE': '{:.1f}'
-                }
-                st.dataframe(
-                    split_report.style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
-                    use_container_width=True, hide_index=True
-                )
-            else:
-                st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found transitioning across the timeline.")
-        else:
-            st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
+                if not pivot.empty and 'Old Machine (< Apr 2026)' in pivot.columns and 'New Machine (>= Apr 2026)' in pivot.columns:
+                    pivot = pivot[(pivot['Old Machine (< Apr 2026)'] > 0) | (pivot['New Machine (>= Apr 2026)'] > 0)]
+                    pivot['Delta (%)'] = pivot['Old Machine (< Apr 2026)'] - pivot['New Machine (>= Apr 2026)']
+                    pivot['Root Cause'] = np.select([
+                        (pivot['Old Machine (< Apr 2026)'] > 10) & (pivot['New Machine (>= Apr 2026)'] < 5),
+                        (pivot['Old Machine (< Apr 2026)'] > 10) & (pivot['New Machine (>= Apr 2026)'] >= 5),
+                        (pivot['New Machine (>= Apr 2026)'] > pivot['Old Machine (< Apr 2026)'] + 5),
+                        (pivot['Old Machine (< Apr 2026)'] > 0) & (pivot['New Machine (>= Apr 2026)'] == 0)
+                    ], ["🚨 Old Machine", "⚠️ Material/Process", "⚙️ New Machine Tuning", "✅ Improved"], default="✅ Stable")
+                    
+                    props = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+                    if props: pivot = pivot.join(df_t6[df_t6[COIL_ID_COL].isin(pivot.index)].groupby(COIL_ID_COL)[props].mean())
+                    
+                    rename_dict = {'Old Machine (< Apr 2026)': 'Scrap (Old)', 'New Machine (>= Apr 2026)': 'Scrap (New)'}
+                    format_dict = {k: '{:.2f}%' if 'Scrap' in k or 'Delta' in k else '{:.1f}' for k in rename_dict.values()}
+                    st.dataframe(pivot.rename(columns=rename_dict).reset_index().style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old)', 'Scrap (New)'], cmap='Reds'), use_container_width=True, hide_index=True)
+                else: st.success("No anomalies detected or missing comparative data.")
+        else: st.error("Missing required columns for Task 6 Analysis.")
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
