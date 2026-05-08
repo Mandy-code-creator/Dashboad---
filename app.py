@@ -996,7 +996,7 @@ with tab6:
         df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
         # Filter from Q4/2025 onwards
-        df_t6 = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
+        df_t6 = df_t6[df_t6['Usage_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
         if df_t6.empty:
             st.warning("No usage data available for materials produced from Q4/2025 onwards.")
