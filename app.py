@@ -970,7 +970,7 @@ if uploaded_file is not None:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
             
     # ==========================================================
-with tab6:
+    with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
 
