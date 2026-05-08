@@ -981,13 +981,12 @@ with tab6:
     USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
     COIL_ID_COL = '鋼捲號碼'
 
-    # Đã thụt lề toàn bộ khối if này vào trong "with tab6:"
     if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
         df_t6 = df[df[LEN_COL] > 0].copy() 
         df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
         df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
-        # Tối ưu 1: Parse ngày tháng bằng vectorized thay vì custom function
+        # Vectorized Date Parsing
         if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
             df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
         else:
@@ -996,17 +995,24 @@ with tab6:
         df_t6 = df_t6.dropna(subset=['Usage_Date'])
         df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-        # Tách riêng dữ liệu từ Q4/2025 trở đi theo yêu cầu
+        # Filter from Q4/2025 onwards
         df_t6 = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
         if df_t6.empty:
             st.warning("No usage data available for materials produced from Q4/2025 onwards.")
         else:
-            # 2. Machine Transition Classification (Vectorized numpy where is faster than apply)
+            # Machine Transition Classification
             cutoff_date = pd.to_datetime('2026-04-01')
             df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
-            # 3 & 4. Monthly Scrap & Material Stability Analysis
+            # FIX: Xử lý giá trị cơ tính (Theoretical Values) để tính trung bình chính xác
+            # Loại bỏ các giá trị <= 0 để không làm lệch kết quả trung bình (ví dụ YPE)
+            props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+            if props_cols:
+                df_t6[props_cols] = df_t6[props_cols].apply(pd.to_numeric, errors='coerce')
+                df_t6[props_cols] = df_t6[props_cols].where(df_t6[props_cols] > 0, np.nan)
+
+            # Monthly Scrap & Material Stability Analysis
             st.subheader("Monthly Scrap & Material Stability Analysis")
             st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -1061,10 +1067,7 @@ with tab6:
                     fig_exec.tight_layout()
                     st.pyplot(fig_exec)
                     
-                    # -----------------------------------------------------------------
-                    # TẢI ẢNH CHẤT LƯỢNG CAO CHO 4 BIỂU ĐỒ ĐƯỜNG
-                    # -----------------------------------------------------------------
-                    import io
+                    # Nút tải ảnh chất lượng cao cho biểu đồ đường
                     buf = io.BytesIO()
                     fig_exec.savefig(buf, format="png", dpi=300, bbox_inches="tight")
                     buf.seek(0)
@@ -1077,25 +1080,22 @@ with tab6:
                         use_container_width=True,
                         key=f"dl_chart_{idx}" 
                     )
-                    
                     plt.close(fig_exec)
 
             st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
             st.markdown("---")
             
-            # 5 & 6. Production vs Usage Quality Matrix
+            # Production vs Usage Quality Matrix
             st.subheader("Production vs Usage Quality Matrix (Main Chart)")
             st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
             available_grades = [g for g in base_grades if g in df_t6.columns]
-            
             agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
             matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
             grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
             matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
             matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
-            
             usage_months = sorted(matrix_data['Usage_Month'].unique())
             prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
 
@@ -1132,7 +1132,6 @@ with tab6:
                     else:
                         scrap_rate = row['Scrap_Rate']
                         bg_color = get_color(scrap_rate)
-                        
                         grade_html = []
                         total_coils = row.get('Total_Coils', 0)
                         if total_coils > 0:
@@ -1141,16 +1140,12 @@ with tab6:
                                 if g_pct > 0:
                                     color = "green" if "A" in g else "red"
                                     grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                        
                         html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                 html_parts.append("</tr>")
             html_parts.append("</tbody></table>")
 
-            # -----------------------------------------------------------------
-            # NÚT CHỤP ẢNH PNG CHO BẢNG HTML
-            # -----------------------------------------------------------------
+            # Screenshot button for Matrix
             matrix_html_str = "".join(html_parts)
-            import streamlit.components.v1 as components
             capture_component = f"""
             <!DOCTYPE html>
             <html>
@@ -1159,7 +1154,7 @@ with tab6:
                 <style>
                     body {{ font-family: sans-serif; margin: 0; padding: 0; }}
                     .btn-capture {{
-                        background-color: #FF4B4B; color: white; border: none; padding: 8px 15px;
+                        background-color: #FF4B4B; color: white; border: none; padding: 10px;
                         border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
                         margin-bottom: 10px; transition: 0.3s; width: 100%;
                     }}
@@ -1190,12 +1185,11 @@ with tab6:
             st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
             st.markdown("---")
             
-            # 7 & 8. Standard Heatmap & Grade Distribution Analysis
+            # Heatmap & Grade Distribution Analysis
             col_h1, col_h2 = st.columns(2)
 
             with col_h1:
                 st.subheader("7. Scrap Heatmap")
-                st.caption("Identifying abnormal batches and transition impacts.")
                 pivot_scrap = matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate')
                 fig_h1, ax_h1 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6)))
                 sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
@@ -1205,9 +1199,7 @@ with tab6:
                 fig_h1.tight_layout()
                 st.pyplot(fig_h1)
                 
-                # -----------------------------------------------------------------
-                # TẢI ẢNH CHẤT LƯỢNG CAO CHO HEATMAP
-                # -----------------------------------------------------------------
+                # Nút tải ảnh Heatmap
                 buf_h1 = io.BytesIO()
                 fig_h1.savefig(buf_h1, format="png", dpi=300, bbox_inches="tight")
                 buf_h1.seek(0)
@@ -1224,7 +1216,6 @@ with tab6:
             
             with col_h2:
                 st.subheader("8. Grade Distribution Analysis")
-                st.caption("Tracking customer grade structure before and after machine transition.")
                 grade_agg_usage = df_t6.groupby('Usage_Month')[available_grades].sum()
                 grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
                 grade_pct_usage = grade_pct_usage.fillna(0)
@@ -1249,9 +1240,7 @@ with tab6:
                 fig_g2.tight_layout()
                 st.pyplot(fig_g2)
                 
-                # -----------------------------------------------------------------
-                # TẢI ẢNH CHẤT LƯỢNG CAO CHO BARCHART
-                # -----------------------------------------------------------------
+                # Nút tải ảnh Grade Chart
                 buf_g2 = io.BytesIO()
                 fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
                 buf_g2.seek(0)
@@ -1268,16 +1257,15 @@ with tab6:
 
         st.markdown("---")
         
-        # 9 & 10. Split Coil Verification & Root Cause Classification
-        st.subheader("9 & 10. Split Coil Verification (Strongest Evidence)")
-        st.info("Identifying identical coils processed on both Old and New machines to isolate machine impact from material quality.")
+        # 9 & 10. Split Coil Verification (Strongest Evidence)
+        st.subheader("9 & 10. Split Coil Verification")
+        st.info("Identifying identical coils processed on both machines to isolate machine impact.")
 
         coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
         coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
         
         old_machine_col = 'Old Machine (< Apr 2026)'
         new_machine_col = 'New Machine (>= Apr 2026)'
-        
         split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
         
         if old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
@@ -1292,37 +1280,25 @@ with tab6:
                 (split_pivot[new_machine_col] > split_pivot[old_machine_col] + 5),
                 (split_pivot[old_machine_col] > 0) & (split_pivot[new_machine_col] == 0)
             ]
-            choices = [
-                "🚨 Old Machine Issue (Proven)",
-                "⚠️ Material / Process Issue",
-                "⚙️ New Machine Tuning Issue",
-                "✅ Improved on New Machine"
-            ]
+            choices = ["🚨 Old Machine Issue (Proven)", "⚠️ Material / Process Issue", "⚙️ New Machine Tuning Issue", "✅ Improved on New Machine"]
             split_pivot['Root Cause Classification'] = np.select(conds, choices, default="✅ Normal / Stable")
             
-            props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
             if props_cols:
                 coil_props = df_t6[df_t6[COIL_ID_COL].isin(split_pivot.index)].groupby(COIL_ID_COL)[props_cols].mean()
                 split_pivot = split_pivot.join(coil_props)
             
-            rename_dict = {
-                old_machine_col: 'Scrap (Old Machine)', 
-                new_machine_col: 'Scrap (New Machine)',
-                'YS': 'Theoretical YS', 'TS': 'Theoretical TS', 
-                'EL': 'Theoretical EL', 'YPE': 'Theoretical YPE'
-            }
+            rename_dict = {old_machine_col: 'Scrap (Old Machine)', new_machine_col: 'Scrap (New Machine)',
+                           'YS': 'Theoretical YS', 'TS': 'Theoretical TS', 'EL': 'Theoretical EL', 'YPE': 'Theoretical YPE'}
             split_report = split_pivot.rename(columns=rename_dict).reset_index()
             
-            format_dict = {
-                'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
-                'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}', 'Theoretical YPE': '{:.1f}'
-            }
+            format_dict = {'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
+                           'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}', 'Theoretical YPE': '{:.1f}'}
             st.dataframe(
                 split_report.style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
                 use_container_width=True, hide_index=True
             )
         else:
-            st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found transitioning across the timeline.")
+            st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found.")
     else:
         st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
     # --- GLOBAL EXPORT ---
