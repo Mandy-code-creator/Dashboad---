@@ -11,6 +11,17 @@ st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
+# --- GLOBAL MATPLOTLIB CONFIGURATION FOR HIGH-RES EXPORT ---
+plt.rcParams['figure.dpi'] = 300
+plt.rcParams['savefig.dpi'] = 300
+plt.rcParams['savefig.bbox'] = 'tight'
+plt.rcParams['font.size'] = 11
+plt.rcParams['axes.titlesize'] = 13
+plt.rcParams['axes.labelsize'] = 11
+plt.rcParams['xtick.labelsize'] = 9
+plt.rcParams['ytick.labelsize'] = 9
+plt.rcParams['legend.fontsize'] = 9
+
 # --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT PER THICKNESS ---
 st.sidebar.header("⚙️ Spec Limits (Control)")
 st.sidebar.info("Limits apply from Q4 2025 onwards. Configured per Thickness.")
@@ -81,7 +92,7 @@ if uploaded_file is not None:
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
-    # LƯU TRỮ DỮ LIỆU GỐC CHO BẢNG GRADE DISTRIBUTION (Chưa lọc độ dày)
+    # STORE ORIGINAL DATA FOR GRADE DISTRIBUTION TABLE (Unfiltered thickness)
     df_global_grades = df[df['Total_Qty'] > 0].copy()
 
     # Handle Thickness & Filtering for Detailed Charts
@@ -212,7 +223,7 @@ if uploaded_file is not None:
         if cpk >= 1.67: return '#2e7d32'   
         if cpk >= 1.33: return '#66bb6a'   
         if cpk >= 1.00: return '#ffa726'   
-        return '#d62728'                   
+        return '#d62728'                    
 
     def cpk_label(cpk, period_label, thickness):
         if thickness == 'Overall': return 'Mixed Specs'
@@ -441,7 +452,6 @@ if uploaded_file is not None:
         st.subheader("📊 Grade Distribution by Time Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
-        # SỬ DỤNG DỮ LIỆU GỐC ĐỂ TÍNH BẢNG DISTRIBUTION (Không bị mất A-B+)
         grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
@@ -645,7 +655,6 @@ if uploaded_file is not None:
             st.markdown("---")
 
     # ==========================================================
-# ==========================================================
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
     # ==========================================================
     with tab4:
@@ -717,7 +726,7 @@ if uploaded_file is not None:
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
                 
-                # Bắt lỗi vượt giới hạn (Thống kê + Kỹ thuật)
+                # Catch out-of-bounds errors (Statistical + Technical)
                 out_condition = (vals > ucl_i) | (vals < lcl_i)
                 
                 if usl is not None:
@@ -764,9 +773,19 @@ if uploaded_file is not None:
                 
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
+                
+                # --- High-Res Download Button ---
+                img_buffer_imr = io.BytesIO()
+                fig_imr.savefig(img_buffer_imr, format="png")
+                st.download_button(
+                    label=f"📥 Download High-Res I-MR Chart ({t4_feat})",
+                    data=img_buffer_imr.getvalue(),
+                    file_name=f"IMR_Chart_{t4_feat}_{t4_thick}mm.png",
+                    mime="image/png",
+                    key=f"download_imr_{t4_feat}"
+                )
 
     # ==========================================================
-# ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
     with tab5:
@@ -775,7 +794,7 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            # Loại bỏ dòng tổng kết cả năm để biểu đồ không bị nhiễu
+            # Remove full-year summary row to prevent chart noise
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
@@ -843,6 +862,16 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
+            
+            # --- High-Res Download Button ---
+            img_buffer_trend = io.BytesIO()
+            fig_trend.savefig(img_buffer_trend, format="png")
+            st.download_button(
+                label="📥 Download High-Res Trend Chart",
+                data=img_buffer_trend.getvalue(),
+                file_name="Rejection_Rate_Trend.png",
+                mime="image/png"
+            )
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
@@ -883,11 +912,11 @@ if uploaded_file is not None:
                 use_container_width=True, hide_index=True
             )
 
-            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS (SỬA LỖI 50%) ---
+            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             
-            # Khởi tạo bảng chi tiết cơ sở (Dùng để hiển thị ở cuối)
+            # Initialize base detail table (For final display)
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(
                 Total_Length=(LEN_COL, 'sum'),
                 Total_Scrap=(SCRAP_COL, 'sum'),
@@ -903,7 +932,7 @@ if uploaded_file is not None:
                 st.markdown("**Scrap Rate by Period & Thickness**")
                 fig_t, ax_t = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    # Gộp tổng Length và Scrap theo Thickness trước, sau đó mới chia tỷ lệ %
+                    # Aggregate total Length and Scrap by Thickness first, then calculate %
                     thick_agg = scrap_detail.groupby(['Time_Group', 'Actual_Thickness']).agg(
                         T_Len=('Total_Length', 'sum'),
                         T_Scrap=('Total_Scrap', 'sum')
@@ -931,7 +960,7 @@ if uploaded_file is not None:
                 st.markdown("**Scrap Rate by Period & Material**")
                 fig_m, ax_m = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
-                    # Gộp tổng Length và Scrap theo Material trước, sau đó mới chia tỷ lệ %
+                    # Aggregate total Length and Scrap by Material first, then calculate %
                     mat_agg = scrap_detail.groupby(['Time_Group', 'HR_Material']).agg(
                         M_Len=('Total_Length', 'sum'),
                         M_Scrap=('Total_Scrap', 'sum')
@@ -966,8 +995,8 @@ if uploaded_file is not None:
 
         else:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
-# ==========================================================
-# ==========================================================
+            
+    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -992,7 +1021,7 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            # Tách riêng dữ liệu từ Q4/2025 trở đi theo yêu cầu
+            # Filter data from Q4/2025 onwards as requested
             df_t6 = df_t6[df_t6['Production_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
             if df_t6.empty:
@@ -1004,7 +1033,7 @@ if uploaded_file is not None:
                     lambda x: 'New Machine (>= Apr 2026)' if x >= cutoff_date else 'Old Machine (< Apr 2026)'
                 )
 
-                # 3 & 4. Monthly Scrap & Material Stability Analysis (BỔ SUNG YPE)
+                # 3 & 4. Monthly Scrap & Material Stability Analysis
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -1014,12 +1043,12 @@ if uploaded_file is not None:
                     Avg_YS=('YS', 'mean'),
                     Avg_TS=('TS', 'mean'),
                     Avg_EL=('EL', 'mean'),
-                    Avg_YPE=('YPE', 'mean') # Thêm tổng hợp YPE
+                    Avg_YPE=('YPE', 'mean') # Add YPE aggregation
                 ).reset_index()
                 macro_df = macro_df.sort_values('Usage_Month')
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
 
-                # Đổi layout sang 2 hàng, mỗi hàng 2 cột để chứa đủ 4 biểu đồ
+                # Change layout to 2 rows, 2 columns each to fit 4 charts
                 row1_cols = st.columns(2)
                 row2_cols = st.columns(2)
                 cols = row1_cols + row2_cols 
@@ -1027,7 +1056,7 @@ if uploaded_file is not None:
                 features = [('Avg_YS', 'Theoretical YS', '#1f77b4'), 
                             ('Avg_TS', 'Theoretical TS', '#2ca02c'), 
                             ('Avg_EL', 'Theoretical EL', '#9467bd'),
-                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')] # Thêm cấu hình đồ thị YPE
+                            ('Avg_YPE', 'Theoretical YPE', '#ff7f0e')] # Add YPE chart configuration
 
                 for idx, (col_name, label, color) in enumerate(features):
                     with cols[idx]:
@@ -1042,7 +1071,7 @@ if uploaded_file is not None:
                         ax1.set_ylim(-0.5, max_scrap * 1.35 + 1 if max_scrap > 0 else 5)
 
                         ax2 = ax1.twinx()
-                        # Xử lý trường hợp cột YPE không tồn tại trong data
+                        # Handle case where YPE column is missing
                         if col_name in macro_df.columns:
                             feat_valid = macro_df[col_name].dropna()
                             if not feat_valid.empty:
@@ -1055,7 +1084,7 @@ if uploaded_file is not None:
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
-                        add_chart_border(ax1) # Giả định hàm này đã được định nghĩa ở trên
+                        add_chart_border(ax1) # Assuming this function is defined above
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
 
@@ -1077,7 +1106,7 @@ if uploaded_file is not None:
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # Build Rich HTML Matrix (Bản vá lỗi hiển thị)
+                # Build Rich HTML Matrix
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
 
@@ -1149,6 +1178,16 @@ if uploaded_file is not None:
                     plt.xticks(rotation=45, ha='right')
                     fig_h1.tight_layout()
                     st.pyplot(fig_h1)
+                    
+                    # --- High-Res Download Button ---
+                    img_buffer_h1 = io.BytesIO()
+                    fig_h1.savefig(img_buffer_h1, format="png")
+                    st.download_button(
+                        label="📥 Download High-Res Heatmap",
+                        data=img_buffer_h1.getvalue(),
+                        file_name="Scrap_Heatmap.png",
+                        mime="image/png"
+                    )
 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
@@ -1199,7 +1238,7 @@ if uploaded_file is not None:
                     
                     if old_val == 0 and new_val == 0: continue
                     
-                    # Bổ sung lấy thuộc tính YPE
+                    # Get YPE property
                     props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
                     props = df_t6[df_t6[COIL_ID_COL] == coil][props_cols].mean().to_dict()
                     
@@ -1223,7 +1262,7 @@ if uploaded_file is not None:
                         'Theoretical YS': props.get('YS', np.nan),
                         'Theoretical TS': props.get('TS', np.nan), 
                         'Theoretical EL': props.get('EL', np.nan),
-                        'Theoretical YPE': props.get('YPE', np.nan), # Đưa YPE vào bảng
+                        'Theoretical YPE': props.get('YPE', np.nan), # Add YPE to table
                         'Root Cause Classification': root
                     })
                     
@@ -1242,6 +1281,7 @@ if uploaded_file is not None:
                 st.warning("No split-coils found transitioning across the April 2026 timeline.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
+            
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
