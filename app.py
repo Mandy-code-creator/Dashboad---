@@ -1188,46 +1188,7 @@ if uploaded_file is not None:
                     fig_h1.tight_layout()
                     st.pyplot(fig_h1)
                     plt.close(fig_h1) # Giải phóng bộ nhớ
-                # CHỈ SỬA Ở ĐÂY: THÊM NÚT CHỤP ẢNH PNG NÉT GẤP 3 LẦN (html2canvas)
-                # ==========================================================
-                import streamlit.components.v1 as components
-                matrix_html_str = "".join(html_parts)
                 
-                capture_component = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                    <style>
-                        body {{ font-family: sans-serif; margin: 0; padding: 0; }}
-                        .btn-capture {{
-                            background-color: #FF4B4B; color: white; border: none; padding: 8px 15px;
-                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
-                            margin-bottom: 10px; transition: 0.3s;
-                        }}
-                        .btn-capture:hover {{ background-color: #ff3333; }}
-                    </style>
-                </head>
-                <body>
-                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart Image (PNG for Report Use)</button>
-                    <div id="matrix-container" style="background: white; padding: 10px; display: inline-block;">
-                        {matrix_html_str}
-                    </div>
-                    <script>
-                        function takeSnapshot() {{
-                            const target = document.getElementById('matrix-container');
-                            html2canvas(target, {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
-                                let link = document.createElement('a');
-                                link.download = 'Quality_Matrix.png';
-                                link.href = canvas.toDataURL('image/png');
-                                link.click();
-                            }});
-                        }}
-                    </script>
-                </body>
-                </html>
-                """
-                components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
                     st.caption("Tracking customer grade structure before and after machine transition.")
