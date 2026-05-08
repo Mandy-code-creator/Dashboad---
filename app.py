@@ -971,6 +971,7 @@ if uploaded_file is not None:
             
     # ==========================================================
 # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
+# TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
@@ -1128,6 +1129,31 @@ if uploaded_file is not None:
                 html_parts.append("</tbody></table>")
 
                 st.markdown("".join(html_parts), unsafe_allow_html=True)
+                
+                # ==========================================================
+                # THÊM NÚT TẢI BẢNG MATRIX GIỮ Y CHANG GIAO DIỆN APP
+                # ==========================================================
+                matrix_html_str = "".join(html_parts)
+                export_html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                <meta charset="UTF-8">
+                <title>Quality Matrix</title>
+                </head>
+                <body style="padding: 20px; font-family: sans-serif;">
+                {matrix_html_str}
+                </body>
+                </html>
+                """
+                st.download_button(
+                    label="📥 Tải Bảng Matrix Này (Mở bằng Chrome để copy/chụp ảnh)",
+                    data=export_html,
+                    file_name="Quality_Matrix.html",
+                    mime="text/html"
+                )
+                # ==========================================================
+                
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
                 st.markdown("---")
                 
