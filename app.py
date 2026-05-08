@@ -970,9 +970,7 @@ if uploaded_file is not None:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
             
     # ==========================================================
-# TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
-    # ==========================================================
-    with tab6:
+with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Evaluating material stability vs. machine impact.")
 
@@ -1018,40 +1016,73 @@ if uploaded_file is not None:
                 html.append("</tbody></table>")
                 st.markdown("".join(html), unsafe_allow_html=True)
 
-                # 2. Nut tai Excel (Giu nguyen mau sac)
+                # ==========================================================
+                # NÚT TẢI EXCEL (DÙNG RICH TEXT ĐỂ GIỮ NGUYÊN MÀU SẮC NHƯ WEB)
+                # ==========================================================
                 import io
                 def create_excel():
                     output = io.BytesIO()
                     writer = pd.ExcelWriter(output, engine='xlsxwriter')
                     wb, ws = writer.book, writer.book.add_worksheet('Quality Matrix')
                     
-                    # Formats
+                    # 1. Định dạng Tiêu đề và viền
                     fmt_head = wb.add_format({'bold':True,'bg_color':'#1a3a5c','font_color':'white','border':1,'align':'center','valign':'vcenter'})
                     fmt_side = wb.add_format({'bold':True,'bg_color':'#f1f3f5','border':1,'align':'center','valign':'vcenter'})
                     
+                    # 2. Định dạng màu nền cho các mức cảnh báo Scrap
+                    bg_fmt = {
+                        'safe': wb.add_format({'bg_color':'#e8f5e9','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
+                        'warn': wb.add_format({'bg_color':'#fff3e0','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
+                        'alert': wb.add_format({'bg_color':'#ffcdd2','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
+                        'danger': wb.add_format({'bg_color':'#e57373','border':1,'text_wrap':True,'valign':'vcenter','align':'center'}),
+                        'nodata': wb.add_format({'bg_color':'#fafafa','border':1,'align':'center','valign':'vcenter','font_color':'#aaaaaa'})
+                    }
+                    
+                    # 3. Định dạng màu chữ đa sắc (Rich Text) bên trong ô
+                    bold_scrap = wb.add_format({'bold': True, 'font_size': 11})
+                    green_pct = wb.add_format({'bold': True, 'font_color': '#2e7d32'})  # Màu xanh lá đậm
+                    red_pct = wb.add_format({'bold': True, 'font_color': '#c62828'})    # Màu đỏ đậm
+                    normal = wb.add_format({'font_size': 10})
+                    
+                    # Ghi Tiêu đề
                     ws.write(0, 0, 'Production \\ Usage', fmt_head)
                     for c, m in enumerate(usage_months): ws.write(0, c+1, m, fmt_head)
 
+                    # Đổ dữ liệu
                     for r, prod in enumerate(prod_periods):
                         ws.write(r+1, 0, prod, fmt_side)
                         for c, usage in enumerate(usage_months):
                             row = matrix_dict.get((prod, usage))
-                            if not row: ws.write(r+1, c+1, "No Data", wb.add_format({'border':1,'align':'center','font_color':'#ccc'}))
+                            if not row: 
+                                ws.write(r+1, c+1, "No Data", bg_fmt['nodata'])
                             else:
                                 sr = row['Scrap_Rate']
-                                bg = "#e8f5e9" if sr < 2 else "#fff3e0" if sr < 5 else "#ffcdd2" if sr < 10 else "#e57373"
-                                txt = f"Scrap: {sr:.1f}%"
-                                for g in available_grades:
-                                    if row.get(g,0) > 0: txt += f"\n{g}: {int(row[g]/row['Total_Coils']*100)}%"
+                                cell_bg = bg_fmt['safe'] if sr < 2 else bg_fmt['warn'] if sr < 5 else bg_fmt['alert'] if sr < 10 else bg_fmt['danger']
                                 
-                                cell_fmt = wb.add_format({'bg_color':bg,'border':1,'text_wrap':True,'valign':'top','font_size':9})
-                                ws.write(r+1, c+1, txt, cell_fmt)
+                                # Khởi tạo danh sách các khối chữ đa định dạng
+                                rich_text = [bold_scrap, f"Scrap: {sr:.1f}%\n"]
+                                
+                                for g in available_grades:
+                                    if row.get(g,0) > 0:
+                                        pct = int(row[g]/row.get('Total_Coils',1)*100)
+                                        pct_color = green_pct if 'A' in g else red_pct
+                                        # Cách nhau ra bằng khoảng trắng cho cân đối
+                                        rich_text.extend([normal, f"{g}:   ", pct_color, f"{pct}%\n"])
+                                
+                                # Xóa dấu xuống dòng bị thừa ở cuối
+                                if len(rich_text) > 2: rich_text[-1] = rich_text[-1].rstrip('\n')
+                                else: rich_text.extend([normal, ""])
+                                
+                                # Lệnh viết chữ đa định dạng thần thánh của Excel
+                                ws.write_rich_string(r+1, c+1, *rich_text, cell_bg)
                     
-                    ws.set_column(0, 0, 20); ws.set_column(1, len(usage_months), 18); ws.set_default_row(65)
+                    # Mở rộng cột và hàng cho giống kích thước app
+                    ws.set_column(0, 0, 20); ws.set_column(1, len(usage_months), 16); ws.set_default_row(75)
                     writer.close()
                     return output.getvalue()
 
-                st.download_button(label="📥 Tải Matrix về Excel (Bản nét cao - Giữ màu)", data=create_excel(), file_name="Quality_Matrix_Report.xlsx")
+                st.download_button(label="📥 Tải Matrix về Excel (Giữ nguyên màu sắc chuẩn)", data=create_excel(), file_name="Quality_Matrix_Report.xlsx")
+                # ==========================================================
 
                 st.markdown("---")
                 col_h1, col_h2 = st.columns(2)
@@ -1084,6 +1115,8 @@ if uploaded_file is not None:
                 
                 if not pivot.empty and 'Old Machine (< Apr 2026)' in pivot.columns and 'New Machine (>= Apr 2026)' in pivot.columns:
                     pivot = pivot[(pivot['Old Machine (< Apr 2026)'] > 0) | (pivot['New Machine (>= Apr 2026)'] > 0)]
+                    
+                if not pivot.empty and 'Old Machine (< Apr 2026)' in pivot.columns and 'New Machine (>= Apr 2026)' in pivot.columns:
                     pivot['Delta (%)'] = pivot['Old Machine (< Apr 2026)'] - pivot['New Machine (>= Apr 2026)']
                     pivot['Root Cause'] = np.select([
                         (pivot['Old Machine (< Apr 2026)'] > 10) & (pivot['New Machine (>= Apr 2026)'] < 5),
@@ -1096,10 +1129,13 @@ if uploaded_file is not None:
                     if props: pivot = pivot.join(df_t6[df_t6[COIL_ID_COL].isin(pivot.index)].groupby(COIL_ID_COL)[props].mean())
                     
                     rename_dict = {'Old Machine (< Apr 2026)': 'Scrap (Old)', 'New Machine (>= Apr 2026)': 'Scrap (New)'}
+                    for p in props: rename_dict[p] = p
                     format_dict = {k: '{:.2f}%' if 'Scrap' in k or 'Delta' in k else '{:.1f}' for k in rename_dict.values()}
                     st.dataframe(pivot.rename(columns=rename_dict).reset_index().style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old)', 'Scrap (New)'], cmap='Reds'), use_container_width=True, hide_index=True)
-                else: st.success("No anomalies detected or missing comparative data.")
-        else: st.error("Missing required columns for Task 6 Analysis.")
+                else: 
+                    st.success("No anomalies detected across multi-machine coils or missing comparative data.")
+        else: 
+            st.error("Missing required columns for Task 6 Analysis.")
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
