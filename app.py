@@ -11,22 +11,6 @@ st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
-# --- HIGH-RES IMAGE SOLUTION ---
-plt.rcParams['figure.dpi'] = 300
-plt.rcParams['savefig.dpi'] = 300
-plt.rcParams['savefig.bbox'] = 'tight'
-
-def create_download_button(fig, filename, btn_key):
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    st.download_button(
-        label="📥 Download High-Res Chart", 
-        data=buf.getvalue(), 
-        file_name=f"{filename}.png", 
-        mime="image/png", 
-        key=btn_key
-    )
-
 # --- SIDEBAR: DYNAMIC SPEC LIMITS INPUT PER THICKNESS ---
 st.sidebar.header("⚙️ Spec Limits (Control)")
 st.sidebar.info("Limits apply from Q4 2025 onwards. Configured per Thickness.")
@@ -521,7 +505,6 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_g.tight_layout()
             st.pyplot(fig_g)
-            create_download_button(fig_g, "Grade_Distribution", "btn_g")
 
         st.markdown("---")
         st.subheader("Charts by Period & Thickness")
@@ -545,7 +528,6 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_y.tight_layout()
             st.pyplot(fig_y)
-            create_download_button(fig_y, "Yield_Thickness", "btn_y")
             
         with col_c2:
             st.markdown("**Defect Rate (%) by Period & Thickness**")
@@ -567,7 +549,6 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_d.tight_layout()
             st.pyplot(fig_d)
-            create_download_button(fig_d, "Defect_Thickness", "btn_d")
 
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
@@ -642,7 +623,6 @@ if uploaded_file is not None:
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
-                    create_download_button(fig, f"Dist_{f}_Overall_{period}", f"btn_ov_{period}_{f}")
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -662,7 +642,6 @@ if uploaded_file is not None:
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
-                        create_download_button(fig, f"Dist_{f}_{thick}_{period}", f"btn_th_{period}_{thick}_{f}")
             st.markdown("---")
 
     # ==========================================================
@@ -784,7 +763,6 @@ if uploaded_file is not None:
                 
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
-                create_download_button(fig_imr, f"IMR_{t4_feat}", f"btn_imr_{t4_feat}")
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -863,7 +841,6 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
-            create_download_button(fig_trend, "Scrap_Trend", "btn_trend")
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
@@ -897,7 +874,6 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_p.tight_layout()
             st.pyplot(fig_p)
-            create_download_button(fig_p, "Scrap_Period", "btn_p")
 
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
@@ -948,7 +924,6 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_t.tight_layout()
                 st.pyplot(fig_t)
-                create_download_button(fig_t, "Scrap_Thick", "btn_t")
 
             with col_m:
                 st.markdown("**Scrap Rate by Period & Material**")
@@ -977,7 +952,6 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
-                create_download_button(fig_m, "Scrap_Mat", "btn_m")
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
             scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
@@ -1082,7 +1056,6 @@ if uploaded_file is not None:
                         add_chart_border(ax1) # Giả định hàm này đã được định nghĩa ở trên
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
-                        create_download_button(fig_exec, f"Trend_{col_name}", f"btn_exec_{col_name}")
 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
 
@@ -1174,7 +1147,6 @@ if uploaded_file is not None:
                     plt.xticks(rotation=45, ha='right')
                     fig_h1.tight_layout()
                     st.pyplot(fig_h1)
-                    create_download_button(fig_h1, "Scrap_Heatmap", "btn_h1")
 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
@@ -1202,7 +1174,6 @@ if uploaded_file is not None:
                     add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
-                    create_download_button(fig_g2, "Grade_Usage", "btn_g2")
 
             st.markdown("---")
             
@@ -1269,7 +1240,7 @@ if uploaded_file is not None:
                 st.warning("No split-coils found transitioning across the April 2026 timeline.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
-
+            
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
