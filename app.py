@@ -970,7 +970,7 @@ if uploaded_file is not None:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
             
     # ==========================================================
-with tab6:
+    with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Evaluating material stability vs. machine impact.")
 
@@ -994,7 +994,6 @@ with tab6:
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 available_grades = [g for g in base_grades if g in df_t6.columns]
                 
-                # ĐÃ SỬA LỖI KEYERROR Ở ĐÂY: Dùng cú pháp named aggregation chuẩn của Pandas
                 matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(
                     Total_Length=(LEN_COL, 'sum'), 
                     Total_Scrap=(SCRAP_COL, 'sum'), 
@@ -1013,7 +1012,8 @@ with tab6:
                     html.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
-                        if not row: html.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                        if not row: 
+                            html.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
                         else:
                             sr = row['Scrap_Rate']
                             bg = "#e8f5e9" if sr < 2 else "#fff3e0" if sr < 5 else "#ffcdd2" if sr < 10 else "#e57373"
