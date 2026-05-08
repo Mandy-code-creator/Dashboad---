@@ -1066,9 +1066,12 @@ if uploaded_file is not None:
                                 ax2.set_ylabel(label, color=color, fontweight='bold', fontsize=9)
                                 ax2.plot(macro_df['Usage_Month'], macro_df[col_name], color=color, marker='s', linestyle='--', linewidth=2, alpha=0.8, label=label)
                                 ax2.tick_params(axis='y', labelcolor=color, labelsize=8)
-                                feat_mean = feat_valid.mean()
-                                if feat_mean > 0:
-                                    ax2.set_ylim(feat_mean * 0.85, feat_mean * 1.15) 
+                                # Thay đổi logic giới hạn trục Y (Dựa vào Min/Max thực tế thay vì Mean)
+                                feat_min = feat_valid.min()
+                                feat_max = feat_valid.max()
+                                # Thêm 15% khoảng trống (padding) ở trên và dưới để đồ thị đẹp hơn
+                                padding = (feat_max - feat_min) * 0.15 if feat_max > feat_min else feat_min * 0.1
+                                ax2.set_ylim(feat_min - padding, feat_max + padding)
 
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
