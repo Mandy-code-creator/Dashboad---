@@ -985,7 +985,8 @@ with tab6:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            if df_t6.empty: st.warning("No usage data available.")
+            if df_t6.empty: 
+                st.warning("No usage data available.")
             else:
                 df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= pd.to_datetime('2026-04-01'), 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
                 
@@ -1005,7 +1006,8 @@ with tab6:
                     html.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
-                        if not row: html.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                        if not row: 
+                            html.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
                         else:
                             sr = row['Scrap_Rate']
                             bg = "#e8f5e9" if sr < 2 else "#fff3e0" if sr < 5 else "#ffcdd2" if sr < 10 else "#e57373"
@@ -1043,9 +1045,11 @@ with tab6:
                 coil_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
                 coil_scrap['Scrap_Rate'] = np.where(coil_scrap[LEN_COL] > 0, (coil_scrap[SCRAP_COL] / coil_scrap[LEN_COL]) * 100, 0)
                 pivot = coil_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
-                pivot = pivot[(pivot['Old Machine (< Apr 2026)'] > 0) | (pivot['New Machine (>= Apr 2026)'] > 0)]
                 
-                if not pivot.empty:
+                if not pivot.empty and 'Old Machine (< Apr 2026)' in pivot.columns and 'New Machine (>= Apr 2026)' in pivot.columns:
+                    pivot = pivot[(pivot['Old Machine (< Apr 2026)'] > 0) | (pivot['New Machine (>= Apr 2026)'] > 0)]
+                    
+                if not pivot.empty and 'Old Machine (< Apr 2026)' in pivot.columns and 'New Machine (>= Apr 2026)' in pivot.columns:
                     pivot['Delta (%)'] = pivot['Old Machine (< Apr 2026)'] - pivot['New Machine (>= Apr 2026)']
                     pivot['Root Cause'] = np.select([
                         (pivot['Old Machine (< Apr 2026)'] > 10) & (pivot['New Machine (>= Apr 2026)'] < 5),
@@ -1057,11 +1061,14 @@ with tab6:
                     props = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
                     if props: pivot = pivot.join(df_t6[df_t6[COIL_ID_COL].isin(pivot.index)].groupby(COIL_ID_COL)[props].mean())
                     
-                    rename_dict = {'Old Machine (< Apr 2026)': 'Scrap (Old)', 'New Machine (>= Apr 2026)': 'Scrap (New)', 'YS': 'YS', 'TS': 'TS', 'EL': 'EL', 'YPE': 'YPE'}
+                    rename_dict = {'Old Machine (< Apr 2026)': 'Scrap (Old)', 'New Machine (>= Apr 2026)': 'Scrap (New)'}
+                    for p in props: rename_dict[p] = p
                     format_dict = {k: '{:.2f}%' if 'Scrap' in k or 'Delta' in k else '{:.1f}' for k in rename_dict.values()}
                     st.dataframe(pivot.rename(columns=rename_dict).reset_index().style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old)', 'Scrap (New)'], cmap='Reds'), use_container_width=True, hide_index=True)
-                else: st.success("No anomalies detected across multi-machine coils.")
-        else: st.error("Missing required columns for Task 6 Analysis.")
+                else: 
+                    st.success("No anomalies detected across multi-machine coils or missing comparative data.")
+        else: 
+            st.error("Missing required columns for Task 6 Analysis.")
     # --- GLOBAL EXPORT ---
     st.sidebar.header("Export Reports")
     if st.sidebar.button("Generate Excel File"):
