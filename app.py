@@ -973,14 +973,15 @@ if uploaded_file is not None:
 # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
 # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
 # ==========================================================
-    with tab6:
-        st.header("6. Customer End-Use Analysis & Machine Transition")
-        st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
+with tab6:
+    st.header("6. Customer End-Use Analysis & Machine Transition")
+    st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
     
-        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-        USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
-        COIL_ID_COL = '鋼捲號碼'
+    possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
+    USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
+    COIL_ID_COL = '鋼捲號碼'
 
+    # Đã thụt lề toàn bộ khối if này vào trong "with tab6:"
     if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
         df_t6 = df[df[LEN_COL] > 0].copy() 
         df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
@@ -1061,20 +1062,23 @@ if uploaded_file is not None:
                     st.pyplot(fig_exec)
                     
                     # -----------------------------------------------------------------
-                    # TẢI ẢNH CHẤT LƯỢNG CAO CHO 4 BIỂU ĐỒ ĐƯỜNG (MATPLOTLIB NATIVE)
+                    # TẢI ẢNH CHẤT LƯỢNG CAO CHO 4 BIỂU ĐỒ ĐƯỜNG
                     # -----------------------------------------------------------------
+                    import io
                     buf = io.BytesIO()
                     fig_exec.savefig(buf, format="png", dpi=300, bbox_inches="tight")
                     buf.seek(0)
                     st.download_button(
-                        label=f"📸 Download {label} Chart (High-Res)",
+                        label=f"📸 Download {label} Chart",
                         data=buf,
                         file_name=f"Scrap_vs_{col_name}.png",
                         mime="image/png",
+                        type="primary",
+                        use_container_width=True,
                         key=f"dl_chart_{idx}" 
                     )
                     
-                    plt.close(fig_exec) # Giải phóng bộ nhớ matplotlib
+                    plt.close(fig_exec)
 
             st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
             st.markdown("---")
@@ -1102,7 +1106,6 @@ if uploaded_file is not None:
                 if rate < 10.0: return "#ffcdd2" 
                 return "#e57373" 
 
-            # Tối ưu 2: Dùng Dict tra cứu O(1) thay cho filter dataframe trong vòng lặp kép
             matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
 
             html_parts = [
@@ -1115,7 +1118,7 @@ if uploaded_file is not None:
                 ".grade-list li { display: flex; justify-content: space-between; }",
                 ".grade-name { font-weight: bold; color: #444; }",
                 "</style>",
-                "<table class='q-matrix'><thead><tr><th>Production \ Usage</th>"
+                "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
             ]
             html_parts.extend([f"<th>{m}</th>" for m in usage_months])
             html_parts.append("</tr></thead><tbody>")
@@ -1144,10 +1147,10 @@ if uploaded_file is not None:
             html_parts.append("</tbody></table>")
 
             # -----------------------------------------------------------------
-            # NÚT CHỤP ẢNH PNG CHO BẢNG HTML (html2canvas)
+            # NÚT CHỤP ẢNH PNG CHO BẢNG HTML
             # -----------------------------------------------------------------
             matrix_html_str = "".join(html_parts)
-            
+            import streamlit.components.v1 as components
             capture_component = f"""
             <!DOCTYPE html>
             <html>
@@ -1158,14 +1161,14 @@ if uploaded_file is not None:
                     .btn-capture {{
                         background-color: #FF4B4B; color: white; border: none; padding: 8px 15px;
                         border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
-                        margin-bottom: 10px; transition: 0.3s;
+                        margin-bottom: 10px; transition: 0.3s; width: 100%;
                     }}
                     .btn-capture:hover {{ background-color: #ff3333; }}
                 </style>
             </head>
             <body>
-                <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart Image (PNG for Report Use)</button>
-                <div id="matrix-container" style="background: white; padding: 10px; display: inline-block;">
+                <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart</button>
+                <div id="matrix-container" style="background: white; padding: 10px; display: inline-block; width: 100%;">
                     {matrix_html_str}
                 </div>
                 <script>
@@ -1183,8 +1186,7 @@ if uploaded_file is not None:
             </html>
             """
             components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
-            # ==========================================================
-                                           
+            
             st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
             st.markdown("---")
             
@@ -1210,10 +1212,12 @@ if uploaded_file is not None:
                 fig_h1.savefig(buf_h1, format="png", dpi=300, bbox_inches="tight")
                 buf_h1.seek(0)
                 st.download_button(
-                    label="📸 Download Heatmap (High-Res)",
+                    label="📸 Download Heatmap",
                     data=buf_h1,
                     file_name="Scrap_Heatmap.png",
                     mime="image/png",
+                    type="primary",
+                    use_container_width=True,
                     key="dl_heatmap"
                 )
                 plt.close(fig_h1) 
@@ -1246,16 +1250,18 @@ if uploaded_file is not None:
                 st.pyplot(fig_g2)
                 
                 # -----------------------------------------------------------------
-                # TẢI ẢNH CHẤT LƯỢNG CAO CHO BARCHART ĐIỂM CHẤT LƯỢNG
+                # TẢI ẢNH CHẤT LƯỢNG CAO CHO BARCHART
                 # -----------------------------------------------------------------
                 buf_g2 = io.BytesIO()
                 fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
                 buf_g2.seek(0)
                 st.download_button(
-                    label="📸 Download Grade Chart (High-Res)",
+                    label="📸 Download Grade Chart",
                     data=buf_g2,
                     file_name="Grade_Distribution.png",
                     mime="image/png",
+                    type="primary",
+                    use_container_width=True,
                     key="dl_grade"
                 )
                 plt.close(fig_g2)
@@ -1266,24 +1272,20 @@ if uploaded_file is not None:
         st.subheader("9 & 10. Split Coil Verification (Strongest Evidence)")
         st.info("Identifying identical coils processed on both Old and New machines to isolate machine impact from material quality.")
 
-        # Tối ưu 3: Vectorized Split Coils logic (Loại bỏ hoàn toàn vòng lặp FOR)
         coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
         coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
         
         old_machine_col = 'Old Machine (< Apr 2026)'
         new_machine_col = 'New Machine (>= Apr 2026)'
         
-        # Khởi tạo Pivot để gộp scrap 2 máy trên cùng 1 hàng. Dùng dropna() để giữ lại cuộn có dùng ở cả 2 máy.
         split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna()
         
-        # Bỏ qua các cuộn có scrap = 0 ở cả 2 máy (như logic cũ)
         if old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
             split_pivot = split_pivot[(split_pivot[old_machine_col] > 0) | (split_pivot[new_machine_col] > 0)]
         
         if not split_pivot.empty and old_machine_col in split_pivot.columns and new_machine_col in split_pivot.columns:
             split_pivot['Delta (%)'] = split_pivot[old_machine_col] - split_pivot[new_machine_col]
             
-            # Logic phân loại bằng Vector
             conds = [
                 (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] < 5),
                 (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] >= 5),
@@ -1298,13 +1300,11 @@ if uploaded_file is not None:
             ]
             split_pivot['Root Cause Classification'] = np.select(conds, choices, default="✅ Normal / Stable")
             
-            # Nối thuộc tính YS/TS/EL/YPE
             props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
             if props_cols:
                 coil_props = df_t6[df_t6[COIL_ID_COL].isin(split_pivot.index)].groupby(COIL_ID_COL)[props_cols].mean()
                 split_pivot = split_pivot.join(coil_props)
             
-            # Đổi tên cột chuẩn bị hiển thị
             rename_dict = {
                 old_machine_col: 'Scrap (Old Machine)', 
                 new_machine_col: 'Scrap (New Machine)',
@@ -1313,7 +1313,6 @@ if uploaded_file is not None:
             }
             split_report = split_pivot.rename(columns=rename_dict).reset_index()
             
-            # Cấu trúc hiển thị bảng
             format_dict = {
                 'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
                 'Theoretical YS': '{:.1f}', 'Theoretical TS': '{:.1f}', 'Theoretical EL': '{:.1f}', 'Theoretical YPE': '{:.1f}'
