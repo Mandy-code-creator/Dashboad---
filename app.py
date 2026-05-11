@@ -1319,3 +1319,91 @@ if uploaded_file is not None:
             file_name="Quality_Scrap_Deep_Analysis.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+# ==========================================================
+    # TASK 7: PRODUCTION-BASED SCRAP & MATERIAL STABILITY
+    # ==========================================================
+    with tab6: # Bạn có thể đổi tên tab thành tab7 hoặc gộp vào tùy ý
+        st.header("7. Production-Based Scrap & Material Stability")
+        st.info("Logic: Identifies unique coils to prevent length overcounting. Length is only counted for the first occurrence of repeated coils.")
+
+        # Tạo bản sao dữ liệu và tiền xử lý thời gian sản xuất
+        df_t7 = df.dropna(subset=['Production_Date', COIL_ID_COL]).copy()
+        df_t7['Prod_Month'] = df_t7['Production_Date'].dt.strftime('%Y-%m')
+        
+        # --- XỬ LÝ DỮ LIỆU LẶP (COIL DEDUPLICATION) ---
+        # Sắp xếp theo ngày sản xuất để xác định lần đầu tiên xuất hiện
+        df_t7 = df_t7.sort_values([COIL_ID_COL, 'Production_Date'])
+        
+        # Lấy bản ghi đầu tiên của mỗi cuộn để tính Chiều dài (Input Length)
+        df_unique_first = df_t7.drop_duplicates(subset=[COIL_ID_COL], keep='first')
+        monthly_input_len = df_unique_first.groupby('Prod_Month')[LEN_COL].sum()
+        
+        # Tính tổng Scrap (Cộng dồn tất cả các lần phát sinh scrap của cuộn đó)
+        monthly_total_scrap = df_t7.groupby('Prod_Month')[SCRAP_COL].sum()
+        
+        # Tính giá trị trung bình của cơ tính (Theoretical Values)
+        # Sử dụng toàn bộ dữ liệu để có cái nhìn tổng quát về độ biến động
+        prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t7.columns]
+        monthly_props = df_t7.groupby('Prod_Month')[prop_cols].mean()
+        
+        # Gộp dữ liệu phân tích
+        t7_summary = pd.DataFrame({
+            'Input_Length': monthly_input_len,
+            'Total_Scrap': monthly_total_scrap
+        }).join(monthly_props).reset_index()
+        
+        t7_summary['Scrap_Rate (%)'] = np.where(
+            t7_summary['Input_Length'] > 0,
+            (t7_summary['Total_Scrap'] / t7_summary['Input_Length'] * 100),
+            0
+        ).round(2)
+
+        # --- HIỂN THỊ BIỂU ĐỒ TƯƠNG QUAN ---
+        st.subheader("Correlation: Scrap Rate vs. Theoretical Values (Factory Date)")
+        
+        t7_row1 = st.columns(2)
+        t7_row2 = st.columns(2)
+        t7_cols = t7_row1 + t7_row2
+        
+        features_to_plot = [
+            ('YS', 'Theoretical YS', '#1f77b4'),
+            ('TS', 'Theoretical TS', '#2ca02c'),
+            ('EL', 'Theoretical EL', '#9467bd'),
+            ('YPE', 'Theoretical YPE', '#ff7f0e')
+        ]
+
+        for idx, (feat_id, label, color) in enumerate(features_to_plot):
+            if feat_id in t7_summary.columns:
+                with t7_cols[idx]:
+                    fig_t7, ax1 = plt.subplots(figsize=(7, 4.5))
+                    
+                    # Trục trái: Scrap Rate
+                    ax1.set_xlabel('Production Month')
+                    ax1.set_ylabel('Scrap Rate (%)', color='#d62728', fontweight='bold')
+                    ax1.plot(t7_summary['Prod_Month'], t7_summary['Scrap_Rate (%)'], 
+                            color='#d62728', marker='o', linewidth=2.5, label='Scrap Rate')
+                    ax1.tick_params(axis='y', labelcolor='#d62728')
+                    
+                    # Trục phải: Theoretical Property
+                    ax2 = ax1.twinx()
+                    ax2.set_ylabel(label, color=color, fontweight='bold')
+                    ax2.plot(t7_summary['Prod_Month'], t7_summary[feat_id], 
+                            color=color, marker='s', linestyle='--', alpha=0.8, label=label)
+                    ax2.tick_params(axis='y', labelcolor=color)
+                    
+                    plt.title(f"Scrap Rate vs {label}", fontweight='bold')
+                    ax1.set_xticklabels(t7_summary['Prod_Month'], rotation=45, ha='right')
+                    add_chart_border(ax1)
+                    fig_t7.tight_layout()
+                    st.pyplot(fig_t7)
+                    plt.close(fig_t7)
+
+        # Hiển thị bảng dữ liệu chi tiết
+        st.markdown("### Production Monthly Analytics Data")
+        st.dataframe(
+            t7_summary.style.format({
+                'Input_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 
+                'Scrap_Rate (%)': '{:.2f}%', 'YS': '{:.1f}', 
+                'TS': '{:.1f}', 'EL': '{:.2f}', 'YPE': '{:.2f}'
+            }), use_container_width=True
+        )
