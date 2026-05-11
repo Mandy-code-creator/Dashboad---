@@ -379,7 +379,7 @@ if uploaded_file is not None:
         add_chart_border(ax)
 
     # --- TABS ---
-    tab1, tab2, tab3, tab4, tab5, tab6, task7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📁 1. Raw Data", 
         "📋 2. Quality Yield", 
         "📈 3. Capability (SPC)", 
