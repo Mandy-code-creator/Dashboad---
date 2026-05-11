@@ -1323,7 +1323,7 @@ if uploaded_file is not None:
 # ==========================================================
     # TASK 7: PRODUCTION-BASED SCRAP & MATERIAL STABILITY
     # ==========================================================
-    with tab6: # Bạn có thể đổi tên tab thành tab7 hoặc gộp vào tùy ý
+    with tab7: # Bạn có thể đổi tên tab thành tab7 hoặc gộp vào tùy ý
         st.header("7. Production-Based Scrap & Material Stability")
         st.info("Logic: Identifies unique coils to prevent length overcounting. Length is only counted for the first occurrence of repeated coils.")
 
