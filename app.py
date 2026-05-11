@@ -386,6 +386,7 @@ if uploaded_file is not None:
         "📉 4. I-MR Tracking",
         "✂️ 5. Tail Scrap",
         "🎯 6. Customer End-Use"
+        "7. Production-Based Scrap & Material Stability"
     ])
 
     # ==========================================================
