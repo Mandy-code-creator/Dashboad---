@@ -1378,6 +1378,20 @@ if uploaded_file is not None:
                         
                     fig_t7.tight_layout()
                     st.pyplot(fig_t7)
+                    
+                    # Nút tải ảnh chất lượng cao cho Task 7
+                    buf_t7 = io.BytesIO()
+                    fig_t7.savefig(buf_t7, format="png", dpi=300, bbox_inches="tight")
+                    buf_t7.seek(0)
+                    st.download_button(
+                        label=f"📸 Download {label} Chart",
+                        data=buf_t7,
+                        file_name=f"Prod_Scrap_vs_{feat_id}.png",
+                        mime="image/png",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"dl_t7_chart_{idx}" 
+                    )
                     plt.close(fig_t7)
 
         # Hiển thị bảng dữ liệu chi tiết
