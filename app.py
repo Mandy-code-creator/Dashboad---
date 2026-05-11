@@ -386,7 +386,7 @@ if uploaded_file is not None:
         "📉 4. I-MR Tracking",
         "✂️ 5. Tail Scrap",
         "🎯 6. Customer End-Use",
-        "7. Production-Based Scrap & Material Stability"
+        "🏭 7. Production-Based Scrap & Material Stability"
     ])
 
     # ==========================================================
@@ -1293,42 +1293,20 @@ if uploaded_file is not None:
                     st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
-            
-    # --- GLOBAL EXPORT ---
-    st.sidebar.header("Export Reports")
-    if st.sidebar.button("Generate Excel File"):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            if not yield_summary.empty:
-                yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
-            if 'grade_dist_display' in locals() and not grade_dist_display.empty:
-                grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
-            if 'cap_summary_rows' in locals() and cap_summary_rows:
-                pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
-            if 'plot_df_base' in locals() and not plot_df_base.empty:
-                plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
-            if 'trend_data' in locals() and not trend_data.empty:
-                trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
-            if 'scrap_by_period' in locals() and not scrap_by_period.empty:
-                scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
-            if 'scrap_detail' in locals() and not scrap_detail.empty:
-                scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
-        
-        st.sidebar.download_button(
-            label="📥 Download Full Excel",
-            data=output.getvalue(),
-            file_name="Quality_Scrap_Deep_Analysis.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-# ==========================================================
+
+    # ==========================================================
     # TASK 7: PRODUCTION-BASED SCRAP & MATERIAL STABILITY
     # ==========================================================
-    with tab7: # Bạn có thể đổi tên tab thành tab7 hoặc gộp vào tùy ý
+    with tab7:
         st.header("7. Production-Based Scrap & Material Stability")
         st.info("Logic: Identifies unique coils to prevent length overcounting. Length is only counted for the first occurrence of repeated coils.")
 
         # Tạo bản sao dữ liệu và tiền xử lý thời gian sản xuất
         df_t7 = df.dropna(subset=['Production_Date', COIL_ID_COL]).copy()
+        
+        # --- LỌC DỮ LIỆU TỪ QUÝ 3/2025 TRỞ ĐI ---
+        df_t7 = df_t7[df_t7['Production_Date'] >= pd.Timestamp(2025, 6, 29)] # Lấy từ Q3 2025
+        
         df_t7['Prod_Month'] = df_t7['Production_Date'].dt.strftime('%Y-%m')
         
         # --- XỬ LÝ DỮ LIỆU LẶP (COIL DEDUPLICATION) ---
@@ -1394,7 +1372,10 @@ if uploaded_file is not None:
                     
                     plt.title(f"Scrap Rate vs {label}", fontweight='bold')
                     ax1.set_xticklabels(t7_summary['Prod_Month'], rotation=45, ha='right')
-                    add_chart_border(ax1)
+                    
+                    if 'add_chart_border' in globals():
+                        add_chart_border(ax1)
+                        
                     fig_t7.tight_layout()
                     st.pyplot(fig_t7)
                     plt.close(fig_t7)
@@ -1407,4 +1388,33 @@ if uploaded_file is not None:
                 'Scrap_Rate (%)': '{:.2f}%', 'YS': '{:.1f}', 
                 'TS': '{:.1f}', 'EL': '{:.2f}', 'YPE': '{:.2f}'
             }), use_container_width=True
+        )
+            
+    # --- GLOBAL EXPORT ---
+    st.sidebar.header("Export Reports")
+    if st.sidebar.button("Generate Excel File"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            if not yield_summary.empty:
+                yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
+            if 'grade_dist_display' in locals() and not grade_dist_display.empty:
+                grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
+            if 'cap_summary_rows' in locals() and cap_summary_rows:
+                pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
+            if 'plot_df_base' in locals() and not plot_df_base.empty:
+                plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
+            if 'trend_data' in locals() and not trend_data.empty:
+                trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
+            if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+                scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
+            if 'scrap_detail' in locals() and not scrap_detail.empty:
+                scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
+            if 't7_summary' in locals() and not t7_summary.empty:
+                t7_summary.to_excel(writer, sheet_name='Task7_Production_Stab', index=False)
+        
+        st.sidebar.download_button(
+            label="📥 Download Full Excel",
+            data=output.getvalue(),
+            file_name="Quality_Scrap_Deep_Analysis.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
