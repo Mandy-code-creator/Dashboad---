@@ -6,7 +6,8 @@ import numpy as np
 import io
 import seaborn as sns
 import streamlit.components.v1 as components
-
+from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
