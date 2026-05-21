@@ -1124,41 +1124,52 @@ if uploaded_file is not None:
 
                 matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
 
-                html_parts = [
-                    "<style>",
-                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
-                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
-                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
-                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
-                    ".grade-list li { display: flex; justify-content: space-between; }",
-                    ".grade-name { font-weight: bold; color: #444; }",
-                    "</style>",
-                    "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
-                ]
-                html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                html_parts.append("</tr></thead><tbody>")
+                # ... (Giữ nguyên các dòng phía trên: matrix_data, matrix_dict, v.v.)
 
+                # --- ĐOẠN CODE MỚI THAY THẾ VÀO ĐÂY ---
+                matrix_html_str = """
+                <style>
+                    .q-matrix { width: 100%; border-collapse: collapse; font-family: 'Segoe UI', sans-serif; font-size: 11px; }
+                    .q-matrix th, .q-matrix td { border: 1px solid #d1d1d1; padding: 6px; text-align: left; }
+                    .q-matrix th { background-color: #f8f9fa; color: #333; font-weight: bold; text-align: center; }
+                    .corner-header { background: linear-gradient(to bottom right, #f8f9fa 50%, #1a3a5c 50%) !important; color: white; position: relative; }
+                    .cell-scrap { font-size: 12px; font-weight: bold; color: #000; margin-bottom: 3px; display: block; border-bottom: 1px solid #ccc; }
+                    .grade-list { list-style-type: none; padding: 0; margin: 0; }
+                    .grade-list li { display: flex; justify-content: space-between; padding: 1px 0; }
+                    .grade-name { color: #555; }
+                </style>
+                <table class='q-matrix'>
+                    <thead>
+                        <tr>
+                            <th class='corner-header'>Production \ Usage</th>
+                """ + "".join([f"<th>{m}</th>" for m in usage_months]) + "</tr></thead><tbody>"
+                
                 for prod in prod_periods:
-                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
+                    matrix_html_str += f"<tr><th style='background-color: #f1f3f5;'>{prod}</th>"
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
                         if not row:
-                            html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                            matrix_html_str += "<td style='background-color: #fafafa; color: #aaa; text-align:center;'>-</td>"
                         else:
                             scrap_rate = row['Scrap_Rate']
                             bg_color = get_color(scrap_rate)
-                            grade_html = []
                             total_coils = row.get('Total_Coils', 0)
+                            grade_html = ""
                             if total_coils > 0:
                                 for g in available_grades:
                                     g_pct = (row.get(g, 0) / total_coils * 100)
                                     if g_pct > 0:
-                                        color = "green" if "A" in g else "red"
-                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
-                    html_parts.append("</tr>")
-                html_parts.append("</tbody></table>")
+                                        grade_html += f"<li><span class='grade-name'>{g}:</span> <span>{g_pct:.0f}%</span></li>"
+                            matrix_html_str += f"""
+                                <td style='background-color: {bg_color};'>
+                                    <span class='cell-scrap'>Scrap: {scrap_rate:.1f}%</span>
+                                    <ul class='grade-list'>{grade_html}</ul>
+                                </td>"""
+                    matrix_html_str += "</tr>"
+                
+                matrix_html_str += "</tbody></table>"
+                
+                # --- GIỮ NGUYÊN ĐOẠN CODE PHÍA DƯỚI (capture_component = ...) ---
 
                 matrix_html_str = "".join(html_parts)
                 capture_component = f"""
