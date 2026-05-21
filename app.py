@@ -1105,8 +1105,19 @@ if uploaded_file is not None:
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
+                WEIGHT_COL = '重量'
+                if WEIGHT_COL in df_t6.columns:
+                    df_t6[WEIGHT_COL] = pd.to_numeric(df_t6[WEIGHT_COL], errors='coerce').fillna(0)
+                else:
+                    df_t6[WEIGHT_COL] = 0.0
+
                 available_grades = [g for g in base_grades if g in df_t6.columns]
-                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
+                agg_dict = {
+                    'Total_Length': (LEN_COL, 'sum'), 
+                    'Total_Scrap': (SCRAP_COL, 'sum'), 
+                    'Total_Coils': ('Total_Qty', 'sum'),
+                    'Total_Weight': (WEIGHT_COL, 'sum')
+                }
                 matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                 matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
@@ -1114,6 +1125,9 @@ if uploaded_file is not None:
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
+
+                prod_summary = matrix_data.groupby('Time_Group').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
+                usage_summary = matrix_data.groupby('Usage_Month').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
 
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
@@ -1133,11 +1147,14 @@ if uploaded_file is not None:
                     ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
                     ".grade-list li { display: flex; justify-content: space-between; }",
                     ".grade-name { font-weight: bold; color: #444; }",
+                    ".sum-cell { background-color: #f8f9fa; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 12px; line-height: 1.6;}",
+                    ".sum-header { background-color: #0d47a1 !important; color: white; font-weight: bold; }",
                     "</style>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
+                
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                html_parts.append("</tr></thead><tbody>")
+                html_parts.append("<th class='sum-header' style='border-left: 2px solid #222;'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
 
                 for prod in prod_periods:
                     html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
@@ -1157,10 +1174,30 @@ if uploaded_file is not None:
                                         color = "green" if "A" in g else "red"
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
                             html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
+                    
+                    p_tot = prod_summary.get(prod, {'Total_Length': 0, 'Total_Weight': 0})
+                    html_parts.append(f"<td class='sum-cell' style='border-left: 2px solid #222;'>"
+                                      f"L: {p_tot['Total_Length']:,.0f}<br>"
+                                      f"W: {p_tot['Total_Weight']:,.0f}</td>")
                     html_parts.append("</tr>")
+
+                html_parts.append("<tr><th class='sum-header' style='border-top: 2px solid #222;'>Total Usage<br>(客戶使用量)</th>")
+                for usage in usage_months:
+                    u_tot = usage_summary.get(usage, {'Total_Length': 0, 'Total_Weight': 0})
+                    html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222;'>"
+                                      f"L: {u_tot['Total_Length']:,.0f}<br>"
+                                      f"W: {u_tot['Total_Weight']:,.0f}</td>")
+                
+                grand_len = sum(u['Total_Length'] for u in usage_summary.values())
+                grand_wt = sum(u['Total_Weight'] for u in usage_summary.values())
+                html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; border-left: 2px solid #222; background-color: #e3f2fd;'>"
+                                  f"L: {grand_len:,.0f}<br>"
+                                  f"W: {grand_wt:,.0f}</td></tr>")
+
                 html_parts.append("</tbody></table>")
 
                 matrix_html_str = "".join(html_parts)
+                
                 capture_component = f"""
                 <!DOCTYPE html>
                 <html>
@@ -1195,9 +1232,9 @@ if uploaded_file is not None:
                 </body>
                 </html>
                 """
-                components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
+                components.html(capture_component, height=max(250, len(prod_periods)*65 + 150), scrolling=True)
                 
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
+                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity. **Summary L: Length, W: Weight**")
                 st.markdown("---")
                 
                 # Heatmap & Grade Distribution Analysis
