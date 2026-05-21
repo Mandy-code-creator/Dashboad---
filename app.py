@@ -46,7 +46,7 @@ if uploaded_file is not None:
 
     # --- 1. DATA PRE-PROCESSING ---
     # Handle Dates & Time Grouping First
-    date_key = '烤三生產日期' 
+    date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
