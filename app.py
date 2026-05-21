@@ -51,28 +51,6 @@ if uploaded_file is not None:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
         
-        def categorize_period(d):
-            if pd.isnull(d): return "Unknown"
-            y = d.year
-            q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
-            
-            if y == 2024: return "2024 (Full Year)"
-            if y == 2025:
-                if d < q3_s: return "2025 H1 (Until 06/28)"
-                if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
-                return d.strftime('%Y-%m')
-            if y >= 2026: return d.strftime('%Y-%m')
-            return "Other"
-            
-        df['Time_Group'] = df['Production_Date'].apply(categorize_period)
-        df = df[df['Time_Group'] != "Other"]
-        
-        df_25 = df[df['Production_Date'].dt.year == 2025].copy()
-        if not df_25.empty:
-            df_25['Time_Group'] = "2025 (Full Year)"
-            df = pd.concat([df, df_25], ignore_index=True)
-    else:
-        df['Time_Group'] = "Unknown"
 
     # Robust Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
