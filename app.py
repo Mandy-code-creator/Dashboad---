@@ -981,9 +981,7 @@ if uploaded_file is not None:
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
-            old_periods = ["2024 (Full Year)", "2025 (Full Year)", "2025 H1 (Until 06/28)", "2025 Q3 (06/29 - 09/30)"]
-            df_t6 = df_t6[~df_t6['Time_Group'].isin(old_periods)]
-
+            # Vectorized Date Parsing
             if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
                 df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
             else:
@@ -992,6 +990,7 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
+            # Filter Usage Month from Q4/2025 onwards
             df_t6 = df_t6[df_t6['Usage_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
             if df_t6.empty:
@@ -1062,7 +1061,7 @@ if uploaded_file is not None:
                 
                 # --- QUALITY MATRIX ---
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
-                st.info("Download explicitly scaled to A4 Landscape proportions.")
+                st.info("Explicitly scaled to A4 Landscape proportions for proper documentation.")
 
                 WEIGHT_COL = '重量'
                 if WEIGHT_COL in df_t6.columns:
@@ -1088,11 +1087,6 @@ if uploaded_file is not None:
                 prod_summary = matrix_data.groupby('Time_Group').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
                 usage_summary = matrix_data.groupby('Usage_Month').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
 
-                total_prod_length = sum(p['Total_Length'] for p in prod_summary.values())
-                total_prod_weight = sum(p['Total_Weight'] for p in prod_summary.values())
-                total_usage_length = sum(u['Total_Length'] for u in usage_summary.values())
-                total_usage_weight = sum(u['Total_Weight'] for u in usage_summary.values())
-
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
                     if rate < 2.0: return "#e8f5e9" 
@@ -1104,39 +1098,33 @@ if uploaded_file is not None:
 
                 html_parts = [
                     "<style>",
-                    ".a4-container { width: 1080px; padding: 20px; margin: auto; background: white; box-sizing: border-box; page-break-inside: avoid; }",
-                    ".report-title { text-align: center; color: #1a3a5c; margin-top: 0; font-family: sans-serif; font-size: 22px; }",
-                    ".summary-box { display: flex; justify-content: space-between; background-color: #f1f3f5; padding: 15px; margin-bottom: 15px; border-left: 5px solid #1a3a5c; font-family: sans-serif; font-size: 16px; font-weight: bold; }",
-                    ".summary-item { text-align: center; color: #333; }",
-                    ".summary-val { color: #d62728; font-size: 20px; display: block; margin-top: 5px; }",
-                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 11.5px; }",
-                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 8px; text-align: center; border: 1px solid #ddd; font-size: 12.5px; }",
-                    ".q-matrix td { border: 1px solid #ccc; padding: 6px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 3px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 2px;}",
-                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.3; }",
-                    ".grade-list li { display: flex; justify-content: space-between; }",
-                    ".grade-name { font-weight: bold; color: #444; }",
-                    ".sum-cell { background-color: #f8f9fa; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 12px; line-height: 1.5; border-left: 2px solid #222; }",
-                    ".sum-header { background-color: #0d47a1 !important; color: white; font-weight: bold; border-left: 2px solid #222; }",
+                    ".a4-container { width: 100%; max-width: 1120px; padding: 15px; margin: auto; background: white; box-sizing: border-box; page-break-inside: avoid; }",
+                    ".report-title { text-align: center; color: #1a3a5c; margin-top: 0; font-family: sans-serif; font-size: 24px; font-weight: bold; text-transform: uppercase; margin-bottom: 20px; }",
+                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 11.5px; table-layout: fixed; }",
+                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px 5px; text-align: center; border: 2px solid #ddd; font-size: 13px; font-weight: bold; }",
+                    ".q-matrix td { border: 1px solid #bbbbbb; padding: 8px 5px; vertical-align: top; text-align: center; }",
+                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 4px; color: #000000; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 2px;}",
+                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; text-align: left; }",
+                    ".grade-list li { display: flex; justify-content: space-between; padding: 0 4px; }",
+                    ".grade-name { font-weight: bold; color: #444444; }",
+                    ".sum-cell { background-color: #eef2f7; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 12.5px; line-height: 1.5; border-left: 2px solid #1a3a5c !important; }",
+                    ".sum-header { background-color: #0d47a1 !important; color: white !important; font-weight: bold; font-size: 13px !important; text-align: center; }",
+                    ".row-title-header { background-color: #f1f3f5; font-weight: bold; color: #222222; font-size: 12px; text-align: left; border-right: 2px solid #1a3a5c !important; }",
                     "</style>",
                     "<div class='a4-container' id='capture-area'>",
-                    "<h2 class='report-title'>QUALITY MATRIX & MATERIAL FLOW REPORT (品質矩陣與材料流向報告)</h2>",
-                    f"<div class='summary-box'>",
-                    f"<div class='summary-item'>Total Produced (生產總量)<span class='summary-val'>L: {total_prod_length:,.0f} m | W: {total_prod_weight:,.0f} T</span></div>",
-                    f"<div class='summary-item'>Total Customer Usage (客戶使用總量)<span class='summary-val'>L: {total_usage_length:,.0f} m | W: {total_usage_weight:,.0f} T</span></div>",
-                    f"</div>",
+                    "<h2 class='report-title'>QUALITY MATRIX (品質矩陣)</h2>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
                 
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                html_parts.append("<th class='sum-header'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
+                html_parts.append("<th class='sum-header' style='border-left: 2px solid #1a3a5c;'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
 
                 for prod in prod_periods:
-                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
+                    html_parts.append(f"<tr><td class='row-title-header'>{prod}</td>")
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
                         if not row:
-                            html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                            html_parts.append("<td style='background-color: #fcfcfc; color: #999999; text-align:center; vertical-align:middle; font-style:italic;'>No Data</td>")
                         else:
                             scrap_rate = row['Scrap_Rate']
                             bg_color = get_color(scrap_rate)
@@ -1147,27 +1135,27 @@ if uploaded_file is not None:
                                     g_pct = (row.get(g, 0) / total_coils * 100)
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
-                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
+                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}; font-weight:bold;'>{g_pct:.0f}%</span></li>")
                             html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     
                     p_tot = prod_summary.get(prod, {'Total_Length': 0, 'Total_Weight': 0})
                     html_parts.append(f"<td class='sum-cell'>"
-                                      f"L: {p_tot['Total_Length']:,.0f}<br>"
-                                      f"W: {p_tot['Total_Weight']:,.0f}</td>")
+                                      f"L: {p_tot['Total_Length']:,.0f} m<br>"
+                                      f"W: {p_tot['Total_Weight']:,.0f} T</td>")
                     html_parts.append("</tr>")
 
-                html_parts.append("<tr><th class='sum-header' style='border-top: 2px solid #222; border-left: 0;'>Total Usage<br>(客戶使用量)</th>")
+                html_parts.append("<tr><td class='sum-header' style='border-top: 2.5px solid #1a3a5c;'>Total Usage<br>(客戶使用量)</td>")
                 for usage in usage_months:
                     u_tot = usage_summary.get(usage, {'Total_Length': 0, 'Total_Weight': 0})
-                    html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; border-left: 0;'>"
-                                      f"L: {u_tot['Total_Length']:,.0f}<br>"
-                                      f"W: {u_tot['Total_Weight']:,.0f}</td>")
+                    html_parts.append(f"<td class='sum-cell' style='border-top: 2.5px solid #1a3a5c; border-left: 0;'>"
+                                      f"L: {u_tot['Total_Length']:,.0f} m<br>"
+                                      f"W: {u_tot['Total_Weight']:,.0f} T</td>")
                 
                 grand_len = sum(u['Total_Length'] for u in usage_summary.values())
                 grand_wt = sum(u['Total_Weight'] for u in usage_summary.values())
-                html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; background-color: #e3f2fd;'>"
-                                  f"L: {grand_len:,.0f}<br>"
-                                  f"W: {grand_wt:,.0f}</td></tr>")
+                html_parts.append(f"<td class='sum-cell' style='border-top: 2.5px solid #1a3a5c; border-left: 2.5px solid #1a3a5c !important; background-color: #bbdefb; color: #b71c1c; font-size: 13px;'> "
+                                      f"Total L: {grand_len:,.0f} m<br>"
+                                      f"Total W: {grand_wt:,.0f} T</td></tr>")
 
                 html_parts.append("</tbody></table></div>")
 
@@ -1183,13 +1171,13 @@ if uploaded_file is not None:
                         .btn-capture {{
                             background-color: #FF4B4B; color: white; border: none; padding: 12px;
                             border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;
-                            margin: 10px auto; transition: 0.3s; display: block; width: 1080px; text-align: center;
+                            margin: 10px auto; transition: 0.3s; display: block; width: 1120px; text-align: center;
                         }}
                         .btn-capture:hover {{ background-color: #ff3333; }}
                     </style>
                 </head>
                 <body>
-                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution A4 Matrix Report</button>
+                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution A4 Matrix Report (PNG)</button>
                     {matrix_html_str}
                     <script>
                         function takeSnapshot() {{
@@ -1201,7 +1189,7 @@ if uploaded_file is not None:
                                 height: target.offsetHeight
                             }}).then(canvas => {{
                                 let link = document.createElement('a');
-                                link.download = 'Quality_Matrix_A4_Report.png';
+                                link.download = 'Quality_Matrix.png';
                                 link.href = canvas.toDataURL('image/png');
                                 link.click();
                             }});
@@ -1210,11 +1198,10 @@ if uploaded_file is not None:
                 </body>
                 </html>
                 """
-                components.html(capture_component, height=max(350, len(prod_periods)*60 + 200), scrolling=True)
-                
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity. **Summary L: Length, W: Weight**")
+                components.html(capture_component, height=max(400, len(prod_periods)*68 + 150), scrolling=True)
                 st.markdown("---")
                 
+                # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
 
                 with col_h1:
