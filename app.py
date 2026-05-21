@@ -1,3 +1,11 @@
+# Auto-fix U+00A0 characters
+import re, sys, pathlib
+_src = pathlib.Path(__file__).read_bytes()
+_fixed = _src.replace(b'\xc2\xa0', b' ')
+if _src != _fixed:
+    pathlib.Path(__file__).write_bytes(_fixed)
+    print("Fixed U+00A0, restarting...")
+    sys.exit(0)
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
