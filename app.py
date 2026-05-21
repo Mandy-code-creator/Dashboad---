@@ -1012,7 +1012,12 @@ if uploaded_file is not None:
 
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
+            df_t6 = df_t6.sort_values('Usage_Date')
 
+            df_t6 = df_t6.drop_duplicates(
+                subset=[COIL_ID_COL],
+                keep='first'
+            )
             # Filter Usage Month from Q4/2025 onwards
             df_t6 = df_t6[df_t6['Usage_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
@@ -1175,15 +1180,19 @@ if uploaded_file is not None:
                     x = str(x)
                 
                     mapping = {
-                
                         "2024_FY": "2024 (Full Year)",
-                
+                    
                         "2025_H1": "2025 H1 (Until 06/28)",
-                
+                    
                         "2025_Q3": "2025 Q3 (06/29 ~ 09/30)",
-                
+                    
+                        "2025_10": "2025-10 (Oct 2025)",
+                    
+                        "2025_11": "2025-11 (Nov 2025)",
+                    
+                        "2025_12": "2025-12 (Dec 2025)",
+                    
                         "2025_FY": "2025 (Full Year)"
-                
                     }
                 
                     return mapping.get(x, x)
