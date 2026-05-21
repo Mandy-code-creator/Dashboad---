@@ -1102,13 +1102,17 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================================
+                ```python
+                # ==========================================================
                 # QUALITY MATRIX
                 # ==========================================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 
                 available_grades = [g for g in base_grades if g in df_t6.columns]
                 
-                # ===== AGG =====
+                # ==========================================================
+                # AGGREGATION
+                # ==========================================================
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'),
                     'Total_Scrap': (SCRAP_COL, 'sum'),
@@ -1130,6 +1134,9 @@ if uploaded_file is not None:
                     how='left'
                 )
                 
+                # ==========================================================
+                # SCRAP RATE
+                # ==========================================================
                 matrix_data['Scrap_Rate'] = np.where(
                     matrix_data['Total_Length'] > 0,
                     matrix_data['Total_Scrap'] / matrix_data['Total_Length'] * 100,
@@ -1137,13 +1144,20 @@ if uploaded_file is not None:
                 ).round(1)
                 
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
-                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
+                
+                prod_periods = (
+                    sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
+                    if 'get_sort_key' in globals()
+                    else sorted(matrix_data['Time_Group'].unique())
+                )
                 
                 matrix_dict = matrix_data.set_index(
                     ['Time_Group', 'Usage_Month']
                 ).to_dict('index')
                 
-                # ===== SUMMARY =====
+                # ==========================================================
+                # SUMMARY
+                # ==========================================================
                 row_summary = matrix_data.groupby('Time_Group').agg({
                     'Total_Length': 'sum',
                     'Total_Coils': 'sum'
@@ -1154,18 +1168,49 @@ if uploaded_file is not None:
                     'Total_Coils': 'sum'
                 }).to_dict('index')
                 
-                # ===== COLOR =====
+                # ==========================================================
+                # FORMAT TIME LABEL
+                # ==========================================================
+                def format_time_label(x):
+                
+                    x = str(x)
+                
+                    mapping = {
+                
+                        "2024_FY": "2024 (Full Year)",
+                
+                        "2025_H1": "2025 H1 (Until 06/28)",
+                
+                        "2025_Q3": "2025 Q3 (06/29 ~ 09/30)",
+                
+                        "2025_FY": "2025 (Full Year)"
+                
+                    }
+                
+                    return mapping.get(x, x)
+                
+                # ==========================================================
+                # COLOR
+                # ==========================================================
                 def get_color(x):
-                    if x < 2: return "#e8f5e9"
-                    if x < 5: return "#fff3e0"
-                    if x < 10: return "#ffe0b2"
+                
+                    if x < 2:
+                        return "#e8f5e9"
+                
+                    if x < 5:
+                        return "#fff3e0"
+                
+                    if x < 10:
+                        return "#ffe0b2"
+                
                     return "#ffcdd2"
                 
                 # ==========================================================
-                # HTML
+                # HTML STYLE
                 # ==========================================================
                 html = """
                 <style>
+                
                 .q-matrix{
                     width:100%;
                     border-collapse:collapse;
@@ -1173,56 +1218,104 @@ if uploaded_file is not None:
                     font-size:12px;
                     table-layout:fixed;
                 }
+                
                 .q-matrix th{
                     background:#163b65;
                     color:white;
                     padding:8px;
                     border:1px solid #ccc;
+                    white-space:nowrap;
                 }
+                
                 .q-matrix td{
                     border:1px solid #ccc;
                     padding:6px;
                     vertical-align:top;
                     min-width:120px;
                 }
+                
                 .title{
                     font-weight:bold;
                     text-align:center;
                     margin-bottom:4px;
+                    font-size:13px;
                 }
+                
                 </style>
                 
                 <table class='q-matrix'>
+                
                 <thead>
+                
                 <tr>
-                <th>Production \\ Usage</th>
+                
+                <th style='min-width:180px;width:180px'>
+                Production \\ Usage
+                </th>
                 """
                 
-                # ===== COLUMN HEADER =====
+                # ==========================================================
+                # HEADER MONTHS
+                # ==========================================================
                 for m in usage_months:
                     html += f"<th>{m}</th>"
                 
-                html += "<th>Total Output<br>(生產總量)</th></tr></thead><tbody>"
+                html += """
+                <th>
+                Total Output<br>(生產總量)
+                </th>
+                
+                </tr>
+                </thead>
+                
+                <tbody>
+                """
                 
                 # ==========================================================
                 # BODY
                 # ==========================================================
                 for prod in prod_periods:
                 
-                    html += f"<tr><th style='background:#f1f3f5;color:black'>{prod}</th>"
+                    html += f"""
+                    <tr>
                 
+                    <th style='background:#f1f3f5;
+                               color:black;
+                               min-width:180px;
+                               white-space:nowrap;'>
+                
+                        {format_time_label(prod)}
+                
+                    </th>
+                    """
+                
+                    # ======================================================
+                    # MATRIX CELL
+                    # ======================================================
                     for usage in usage_months:
                 
                         row = matrix_dict.get((prod, usage))
                 
                         if not row:
-                            html += "<td style='text-align:center;color:#999'>No Data</td>"
+                
+                            html += """
+                            <td style='text-align:center;
+                                       color:#999;
+                                       background:#fafafa;
+                                       vertical-align:middle;'>
+                
+                                No Data
+                
+                            </td>
+                            """
+                
                             continue
                 
                         scrap = row['Scrap_Rate']
                         bg = get_color(scrap)
                 
                         grades = ""
+                
                         total = row.get('Total_Coils', 0)
                 
                         if total > 0:
@@ -1236,26 +1329,49 @@ if uploaded_file is not None:
                                     color = "green" if "A" in g else "red"
                 
                                     grades += f"""
-                                    <div style='display:flex;justify-content:space-between'>
+                                    <div style='display:flex;
+                                                justify-content:space-between;
+                                                line-height:1.4;'>
+                
                                         <span><b>{g}</b></span>
-                                        <span style='color:{color}'><b>{pct:.0f}%</b></span>
+                
+                                        <span style='color:{color}'>
+                                            <b>{pct:.0f}%</b>
+                                        </span>
+                
                                     </div>
                                     """
                 
                         html += f"""
                         <td style='background:{bg}'>
-                            <div class='title'>Scrap: {scrap:.1f}%</div>
+                
+                            <div class='title'>
+                                Scrap: {scrap:.1f}%
+                            </div>
+                
                             {grades}
+                
                         </td>
                         """
                 
-                    # ===== ROW SUMMARY =====
+                    # ======================================================
+                    # ROW SUMMARY
+                    # ======================================================
                     rs = row_summary.get(prod, {})
                 
                     html += f"""
-                    <td style='background:#f5f7fa;text-align:center;font-weight:bold'>
-                        <div style='color:#1565c0'>L: {rs.get('Total_Length',0):,.0f} m</div>
-                        <div style='color:#283593'>W: {rs.get('Total_Coils',0):,.0f} T</div>
+                    <td style='background:#f5f7fa;
+                               text-align:center;
+                               font-weight:bold'>
+                
+                        <div style='color:#1565c0'>
+                            L: {rs.get('Total_Length',0):,.0f} m
+                        </div>
+                
+                        <div style='color:#283593'>
+                            W: {rs.get('Total_Coils',0):,.0f} T
+                        </div>
+                
                     </td>
                     """
                 
@@ -1266,8 +1382,11 @@ if uploaded_file is not None:
                 # ==========================================================
                 html += """
                 <tr>
+                
                 <th style='background:#0d47a1'>
+                
                 Total Usage<br>(客戶使用量)
+                
                 </th>
                 """
                 
@@ -1276,33 +1395,137 @@ if uploaded_file is not None:
                     cs = col_summary.get(usage, {})
                 
                     html += f"""
-                    <td style='background:#eef3f8;text-align:center;font-weight:bold'>
-                        <div style='color:#1565c0'>L: {cs.get('Total_Length',0):,.0f} m</div>
-                        <div style='color:#283593'>W: {cs.get('Total_Coils',0):,.0f} T</div>
+                    <td style='background:#eef3f8;
+                               text-align:center;
+                               font-weight:bold'>
+                
+                        <div style='color:#1565c0'>
+                            L: {cs.get('Total_Length',0):,.0f} m
+                        </div>
+                
+                        <div style='color:#283593'>
+                            W: {cs.get('Total_Coils',0):,.0f} T
+                        </div>
+                
                     </td>
                     """
                 
+                # ==========================================================
+                # GRAND TOTAL
+                # ==========================================================
                 html += f"""
-                <td style='background:#dbe5f1;text-align:center;font-weight:bold'>
+                <td style='background:#dbe5f1;
+                           text-align:center;
+                           font-weight:bold'>
+                
                     <div style='color:#c62828'>
                         Total L: {matrix_data['Total_Length'].sum():,.0f} m
                     </div>
+                
                     <div style='color:#c62828'>
                         Total W: {matrix_data['Total_Coils'].sum():,.0f} T
                     </div>
+                
                 </td>
                 """
                 
-                html += "</tr></tbody></table>"
+                html += """
+                </tr>
+                </tbody>
+                </table>
+                """
+                
+                # ==========================================================
+                # DOWNLOAD COMPONENT
+                # ==========================================================
+                capture_html = f"""
+                <!DOCTYPE html>
+                <html>
+                
+                <head>
+                
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                
+                <style>
+                
+                body {{
+                    margin:0;
+                    padding:0;
+                    background:white;
+                }}
+                
+                .btn-download {{
+                
+                    width:100%;
+                    padding:10px;
+                    border:none;
+                    background:#ff4b4b;
+                    color:white;
+                    font-weight:bold;
+                    border-radius:6px;
+                    cursor:pointer;
+                    margin-bottom:10px;
+                }}
+                
+                .btn-download:hover {{
+                    background:#e53935;
+                }}
+                
+                </style>
+                
+                </head>
+                
+                <body>
+                
+                <button class="btn-download" onclick="downloadMatrix()">
+                📸 Download Matrix PNG
+                </button>
+                
+                <div id="matrix-area">
+                
+                {html}
+                
+                </div>
+                
+                <script>
+                
+                function downloadMatrix() {{
+                
+                    html2canvas(document.getElementById("matrix-area"), {{
+                        scale: 3,
+                        backgroundColor: "#ffffff"
+                    }}).then(canvas => {{
+                
+                        const link = document.createElement("a");
+                
+                        link.download = "Quality_Matrix.png";
+                
+                        link.href = canvas.toDataURL();
+                
+                        link.click();
+                
+                    }});
+                
+                }}
+                
+                </script>
+                
+                </body>
+                </html>
+                """
                 
                 # ==========================================================
                 # DISPLAY
                 # ==========================================================
                 components.html(
-                    html,
-                    height=max(300, len(prod_periods) * 85 + 180),
+                    capture_html,
+                    height=max(350, len(prod_periods) * 90 + 220),
                     scrolling=True
                 )
+                
+                st.markdown("---")
+                ```
+
                 
                 # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
