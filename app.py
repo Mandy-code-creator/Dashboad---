@@ -29,14 +29,14 @@ GLOBAL_SPECS = {0.5: {}, 0.6: {}, 0.8: {}}
 target_thicks = [0.5, 0.6, 0.8]
 
 for t in target_thicks:
-    with st.sidebar.expander(f"📏 Limits for {t}mm"):
-        for feat in ['YS', 'TS', 'EL', 'YPE']:
-            st.caption(f"**{feat}**")
-            c1, c2, c3 = st.columns(3)
-            min_v = c1.number_input("Min", value=None, key=f"{t}_{feat}_min", label_visibility="collapsed", placeholder="Min")
-            max_v = c2.number_input("Max", value=None, key=f"{t}_{feat}_max", label_visibility="collapsed", placeholder="Max")
-            tgt_v = c3.number_input("Tgt", value=None, key=f"{t}_{feat}_tgt", label_visibility="collapsed", placeholder="Tgt")
-            GLOBAL_SPECS[t][feat] = {'min': min_v, 'max': max_v, 'target': tgt_v}
+    with st.sidebar.expander(f"📏 Limits for {t}mm"):
+        for feat in ['YS', 'TS', 'EL', 'YPE']:
+            st.caption(f"**{feat}**")
+            c1, c2, c3 = st.columns(3)
+            min_v = c1.number_input("Min", value=None, key=f"{t}_{feat}_min", label_visibility="collapsed", placeholder="Min")
+            max_v = c2.number_input("Max", value=None, key=f"{t}_{feat}_max", label_visibility="collapsed", placeholder="Max")
+            tgt_v = c3.number_input("Tgt", value=None, key=f"{t}_{feat}_tgt", label_visibility="collapsed", placeholder="Tgt")
+            GLOBAL_SPECS[t][feat] = {'min': min_v, 'max': max_v, 'target': tgt_v}
 
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
