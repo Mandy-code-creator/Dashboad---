@@ -1200,7 +1200,48 @@ if uploaded_file is not None:
                 """
                 components.html(capture_component, height=max(400, len(prod_periods)*68 + 150), scrolling=True)
                 st.markdown("---")
-                
+                # ✅ THÊM VÀO ĐÂY — ngay sau st.markdown("---")
+                import io, base64, subprocess, tempfile, os
+
+                def _matrix_html_to_word_bytes(html_str: str) -> bytes:
+                    with tempfile.TemporaryDirectory() as tmp:
+                        html_path = os.path.join(tmp, "matrix.html")
+                        full_html = f"""<!DOCTYPE html><html><head>
+                        <meta charset="utf-8">
+                        <style>
+                            @page {{ size: A4 landscape; margin: 1cm; }}
+                            body {{ font-family: Arial, sans-serif; margin: 0; }}
+                        </style>
+                        </head><body>{html_str}</body></html>"""
+                        with open(html_path, "w", encoding="utf-8") as f:
+                            f.write(full_html)
+                        subprocess.run(
+                            ["python3", "/mnt/skills/public/docx/scripts/office/soffice.py",
+                             "--headless", "--convert-to", "docx", html_path, "--outdir", tmp],
+                            capture_output=True, timeout=60
+                        )
+                        docx_path = os.path.join(tmp, "matrix.docx")
+                        if not os.path.exists(docx_path):
+                            raise FileNotFoundError("LibreOffice conversion failed")
+                        with open(docx_path, "rb") as f:
+                            return f.read()
+
+                if st.button("📄 Tải Quality Matrix về Word (.docx)", key="btn_dl_word"):
+                    with st.spinner("Đang tạo file Word..."):
+                        try:
+                            docx_bytes = _matrix_html_to_word_bytes(matrix_html_str)
+                            st.download_button(
+                                label="📥 Download Quality_Matrix.docx",
+                                data=docx_bytes,
+                                file_name="Quality_Matrix.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                key="dl_word_file",
+                            )
+                        except Exception as e:
+                            st.error(f"Lỗi tạo Word: {e}")
+
+                # Heatmap & Grade Distribution Analysis  ← dòng này đã có sẵn, giữ nguyên
+                col_h1, col_h2 = st.columns(2)
                 # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
 
