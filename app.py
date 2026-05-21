@@ -1105,10 +1105,12 @@ if uploaded_file is not None:
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
                 
-                # --- 1. TỐI ƯU DỮ LIỆU ---
-                # Đã cập nhật tên cột thành '鋼捲號碼' theo thông tin bạn cung cấp
+                # --- 1. CẤU HÌNH CỘT (CẦN SỬA ĐOẠN NÀY) ---
+                # Kiểm tra trong dataframe df_t6 của bạn xem cột trọng lượng tên là gì và sửa ở đây
+                WEIGHT_COL = '重量'  # <--- VÍ DỤ: Nếu cột trong file là 'Weight', hãy sửa thành 'Weight'
                 id_col_name = '鋼捲號碼' 
                 
+                # --- 2. TỐI ƯU DỮ LIỆU ---
                 # Khử trùng lặp
                 df_clean = df_t6.drop_duplicates(subset=[id_col_name], keep='first').copy()
                 
@@ -1123,8 +1125,7 @@ if uploaded_file is not None:
                     }
                     return mapping.get(val, 99)
                 
-                # --- 2. TÍNH TOÁN DỮ LIỆU ---
-                # Đảm bảo các biến LEN_COL, SCRAP_COL, WEIGHT_COL đã được khai báo trước đó
+                # --- 3. TÍNH TOÁN DỮ LIỆU ---
                 available_grades = [g for g in base_grades if g in df_clean.columns]
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
@@ -1150,7 +1151,7 @@ if uploaded_file is not None:
                 
                 matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
                 
-                # --- 3. RENDER HTML ---
+                # --- 4. RENDER HTML ---
                 html_parts = [
                     "<style>",
                     ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
