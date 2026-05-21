@@ -1102,7 +1102,7 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================================
-                ```python
+                python
                 # ==========================================================
                 # QUALITY MATRIX
                 # ==========================================================
@@ -1524,7 +1524,7 @@ if uploaded_file is not None:
                 )
                 
                 st.markdown("---")
-                ```
+                
 
                 
                 # Heatmap & Grade Distribution Analysis
