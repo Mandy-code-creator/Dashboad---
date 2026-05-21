@@ -1102,207 +1102,207 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================================
-# QUALITY MATRIX
-# ==========================================================
-st.subheader("Production vs Usage Quality Matrix (Main Chart)")
-
-available_grades = [g for g in base_grades if g in df_t6.columns]
-
-# ===== AGG =====
-agg_dict = {
-    'Total_Length': (LEN_COL, 'sum'),
-    'Total_Scrap': (SCRAP_COL, 'sum'),
-    'Total_Coils': ('Total_Qty', 'sum')
-}
-
-matrix_data = df_t6.groupby(
-    ['Usage_Month', 'Time_Group']
-).agg(**agg_dict).reset_index()
-
-grade_data = df_t6.groupby(
-    ['Usage_Month', 'Time_Group']
-)[available_grades].sum().reset_index()
-
-matrix_data = pd.merge(
-    matrix_data,
-    grade_data,
-    on=['Usage_Month', 'Time_Group'],
-    how='left'
-)
-
-matrix_data['Scrap_Rate'] = np.where(
-    matrix_data['Total_Length'] > 0,
-    matrix_data['Total_Scrap'] / matrix_data['Total_Length'] * 100,
-    0
-).round(1)
-
-usage_months = sorted(matrix_data['Usage_Month'].unique())
-prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
-
-matrix_dict = matrix_data.set_index(
-    ['Time_Group', 'Usage_Month']
-).to_dict('index')
-
-# ===== SUMMARY =====
-row_summary = matrix_data.groupby('Time_Group').agg({
-    'Total_Length': 'sum',
-    'Total_Coils': 'sum'
-}).to_dict('index')
-
-col_summary = matrix_data.groupby('Usage_Month').agg({
-    'Total_Length': 'sum',
-    'Total_Coils': 'sum'
-}).to_dict('index')
-
-# ===== COLOR =====
-def get_color(x):
-    if x < 2: return "#e8f5e9"
-    if x < 5: return "#fff3e0"
-    if x < 10: return "#ffe0b2"
-    return "#ffcdd2"
-
-# ==========================================================
-# HTML
-# ==========================================================
-html = """
-<style>
-.q-matrix{
-    width:100%;
-    border-collapse:collapse;
-    font-family:Arial;
-    font-size:12px;
-    table-layout:fixed;
-}
-.q-matrix th{
-    background:#163b65;
-    color:white;
-    padding:8px;
-    border:1px solid #ccc;
-}
-.q-matrix td{
-    border:1px solid #ccc;
-    padding:6px;
-    vertical-align:top;
-    min-width:120px;
-}
-.title{
-    font-weight:bold;
-    text-align:center;
-    margin-bottom:4px;
-}
-</style>
-
-<table class='q-matrix'>
-<thead>
-<tr>
-<th>Production \\ Usage</th>
-"""
-
-# ===== COLUMN HEADER =====
-for m in usage_months:
-    html += f"<th>{m}</th>"
-
-html += "<th>Total Output<br>(生產總量)</th></tr></thead><tbody>"
-
-# ==========================================================
-# BODY
-# ==========================================================
-for prod in prod_periods:
-
-    html += f"<tr><th style='background:#f1f3f5;color:black'>{prod}</th>"
-
-    for usage in usage_months:
-
-        row = matrix_dict.get((prod, usage))
-
-        if not row:
-            html += "<td style='text-align:center;color:#999'>No Data</td>"
-            continue
-
-        scrap = row['Scrap_Rate']
-        bg = get_color(scrap)
-
-        grades = ""
-        total = row.get('Total_Coils', 0)
-
-        if total > 0:
-
-            for g in available_grades:
-
-                pct = row.get(g, 0) / total * 100
-
-                if pct > 0:
-
-                    color = "green" if "A" in g else "red"
-
-                    grades += f"""
-                    <div style='display:flex;justify-content:space-between'>
-                        <span><b>{g}</b></span>
-                        <span style='color:{color}'><b>{pct:.0f}%</b></span>
-                    </div>
+                # QUALITY MATRIX
+                # ==========================================================
+                st.subheader("Production vs Usage Quality Matrix (Main Chart)")
+                
+                available_grades = [g for g in base_grades if g in df_t6.columns]
+                
+                # ===== AGG =====
+                agg_dict = {
+                    'Total_Length': (LEN_COL, 'sum'),
+                    'Total_Scrap': (SCRAP_COL, 'sum'),
+                    'Total_Coils': ('Total_Qty', 'sum')
+                }
+                
+                matrix_data = df_t6.groupby(
+                    ['Usage_Month', 'Time_Group']
+                ).agg(**agg_dict).reset_index()
+                
+                grade_data = df_t6.groupby(
+                    ['Usage_Month', 'Time_Group']
+                )[available_grades].sum().reset_index()
+                
+                matrix_data = pd.merge(
+                    matrix_data,
+                    grade_data,
+                    on=['Usage_Month', 'Time_Group'],
+                    how='left'
+                )
+                
+                matrix_data['Scrap_Rate'] = np.where(
+                    matrix_data['Total_Length'] > 0,
+                    matrix_data['Total_Scrap'] / matrix_data['Total_Length'] * 100,
+                    0
+                ).round(1)
+                
+                usage_months = sorted(matrix_data['Usage_Month'].unique())
+                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
+                
+                matrix_dict = matrix_data.set_index(
+                    ['Time_Group', 'Usage_Month']
+                ).to_dict('index')
+                
+                # ===== SUMMARY =====
+                row_summary = matrix_data.groupby('Time_Group').agg({
+                    'Total_Length': 'sum',
+                    'Total_Coils': 'sum'
+                }).to_dict('index')
+                
+                col_summary = matrix_data.groupby('Usage_Month').agg({
+                    'Total_Length': 'sum',
+                    'Total_Coils': 'sum'
+                }).to_dict('index')
+                
+                # ===== COLOR =====
+                def get_color(x):
+                    if x < 2: return "#e8f5e9"
+                    if x < 5: return "#fff3e0"
+                    if x < 10: return "#ffe0b2"
+                    return "#ffcdd2"
+                
+                # ==========================================================
+                # HTML
+                # ==========================================================
+                html = """
+                <style>
+                .q-matrix{
+                    width:100%;
+                    border-collapse:collapse;
+                    font-family:Arial;
+                    font-size:12px;
+                    table-layout:fixed;
+                }
+                .q-matrix th{
+                    background:#163b65;
+                    color:white;
+                    padding:8px;
+                    border:1px solid #ccc;
+                }
+                .q-matrix td{
+                    border:1px solid #ccc;
+                    padding:6px;
+                    vertical-align:top;
+                    min-width:120px;
+                }
+                .title{
+                    font-weight:bold;
+                    text-align:center;
+                    margin-bottom:4px;
+                }
+                </style>
+                
+                <table class='q-matrix'>
+                <thead>
+                <tr>
+                <th>Production \\ Usage</th>
+                """
+                
+                # ===== COLUMN HEADER =====
+                for m in usage_months:
+                    html += f"<th>{m}</th>"
+                
+                html += "<th>Total Output<br>(生產總量)</th></tr></thead><tbody>"
+                
+                # ==========================================================
+                # BODY
+                # ==========================================================
+                for prod in prod_periods:
+                
+                    html += f"<tr><th style='background:#f1f3f5;color:black'>{prod}</th>"
+                
+                    for usage in usage_months:
+                
+                        row = matrix_dict.get((prod, usage))
+                
+                        if not row:
+                            html += "<td style='text-align:center;color:#999'>No Data</td>"
+                            continue
+                
+                        scrap = row['Scrap_Rate']
+                        bg = get_color(scrap)
+                
+                        grades = ""
+                        total = row.get('Total_Coils', 0)
+                
+                        if total > 0:
+                
+                            for g in available_grades:
+                
+                                pct = row.get(g, 0) / total * 100
+                
+                                if pct > 0:
+                
+                                    color = "green" if "A" in g else "red"
+                
+                                    grades += f"""
+                                    <div style='display:flex;justify-content:space-between'>
+                                        <span><b>{g}</b></span>
+                                        <span style='color:{color}'><b>{pct:.0f}%</b></span>
+                                    </div>
+                                    """
+                
+                        html += f"""
+                        <td style='background:{bg}'>
+                            <div class='title'>Scrap: {scrap:.1f}%</div>
+                            {grades}
+                        </td>
+                        """
+                
+                    # ===== ROW SUMMARY =====
+                    rs = row_summary.get(prod, {})
+                
+                    html += f"""
+                    <td style='background:#f5f7fa;text-align:center;font-weight:bold'>
+                        <div style='color:#1565c0'>L: {rs.get('Total_Length',0):,.0f} m</div>
+                        <div style='color:#283593'>W: {rs.get('Total_Coils',0):,.0f} T</div>
+                    </td>
                     """
-
-        html += f"""
-        <td style='background:{bg}'>
-            <div class='title'>Scrap: {scrap:.1f}%</div>
-            {grades}
-        </td>
-        """
-
-    # ===== ROW SUMMARY =====
-    rs = row_summary.get(prod, {})
-
-    html += f"""
-    <td style='background:#f5f7fa;text-align:center;font-weight:bold'>
-        <div style='color:#1565c0'>L: {rs.get('Total_Length',0):,.0f} m</div>
-        <div style='color:#283593'>W: {rs.get('Total_Coils',0):,.0f} T</div>
-    </td>
-    """
-
-    html += "</tr>"
-
-# ==========================================================
-# BOTTOM SUMMARY
-# ==========================================================
-html += """
-<tr>
-<th style='background:#0d47a1'>
-Total Usage<br>(客戶使用量)
-</th>
-"""
-
-for usage in usage_months:
-
-    cs = col_summary.get(usage, {})
-
-    html += f"""
-    <td style='background:#eef3f8;text-align:center;font-weight:bold'>
-        <div style='color:#1565c0'>L: {cs.get('Total_Length',0):,.0f} m</div>
-        <div style='color:#283593'>W: {cs.get('Total_Coils',0):,.0f} T</div>
-    </td>
-    """
-
-html += f"""
-<td style='background:#dbe5f1;text-align:center;font-weight:bold'>
-    <div style='color:#c62828'>
-        Total L: {matrix_data['Total_Length'].sum():,.0f} m
-    </div>
-    <div style='color:#c62828'>
-        Total W: {matrix_data['Total_Coils'].sum():,.0f} T
-    </div>
-</td>
-"""
-
-html += "</tr></tbody></table>"
-
-# ==========================================================
-# DISPLAY
-# ==========================================================
-components.html(
-    html,
-    height=max(300, len(prod_periods) * 85 + 180),
-    scrolling=True
-)
+                
+                    html += "</tr>"
+                
+                # ==========================================================
+                # BOTTOM SUMMARY
+                # ==========================================================
+                html += """
+                <tr>
+                <th style='background:#0d47a1'>
+                Total Usage<br>(客戶使用量)
+                </th>
+                """
+                
+                for usage in usage_months:
+                
+                    cs = col_summary.get(usage, {})
+                
+                    html += f"""
+                    <td style='background:#eef3f8;text-align:center;font-weight:bold'>
+                        <div style='color:#1565c0'>L: {cs.get('Total_Length',0):,.0f} m</div>
+                        <div style='color:#283593'>W: {cs.get('Total_Coils',0):,.0f} T</div>
+                    </td>
+                    """
+                
+                html += f"""
+                <td style='background:#dbe5f1;text-align:center;font-weight:bold'>
+                    <div style='color:#c62828'>
+                        Total L: {matrix_data['Total_Length'].sum():,.0f} m
+                    </div>
+                    <div style='color:#c62828'>
+                        Total W: {matrix_data['Total_Coils'].sum():,.0f} T
+                    </div>
+                </td>
+                """
+                
+                html += "</tr></tbody></table>"
+                
+                # ==========================================================
+                # DISPLAY
+                # ==========================================================
+                components.html(
+                    html,
+                    height=max(300, len(prod_periods) * 85 + 180),
+                    scrolling=True
+                )
                 
                 # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
