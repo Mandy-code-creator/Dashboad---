@@ -1100,18 +1100,19 @@ if uploaded_file is not None:
 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
                 st.markdown("---")
+                
                 # Production vs Usage Quality Matrix (Main Chart)
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
                 
                 # --- 1. TỐI ƯU DỮ LIỆU ---
-                # QUAN TRỌNG: Hãy đảm bảo 'Coil_ID' khớp với tên cột trong data của bạn
-                # Nếu bạn không chắc tên là gì, hãy chạy st.write(df_t6.columns) ở đâu đó để kiểm tra
-                id_col_name = 'Coil_ID' # <-- SỬA TÊN CỘT TẠI ĐÂY NẾU CẦN
+                # Đã cập nhật tên cột thành '鋼捲號碼' theo thông tin bạn cung cấp
+                id_col_name = '鋼捲號碼' 
                 
+                # Khử trùng lặp
                 df_clean = df_t6.drop_duplicates(subset=[id_col_name], keep='first').copy()
                 
-                # Logic sort key
+                # Logic phân nhóm thời gian
                 def get_sort_key(val):
                     mapping = {
                         "2024 (Full Year)": 0,
@@ -1122,13 +1123,14 @@ if uploaded_file is not None:
                     }
                     return mapping.get(val, 99)
                 
-                # --- 2. TÍNH TOÁN ---
+                # --- 2. TÍNH TOÁN DỮ LIỆU ---
+                # Đảm bảo các biến LEN_COL, SCRAP_COL, WEIGHT_COL đã được khai báo trước đó
                 available_grades = [g for g in base_grades if g in df_clean.columns]
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
                     'Total_Coils': ('Total_Qty', 'sum'),
-                    'Total_Weight': (WEIGHT_COL, 'sum') # Đảm bảo đã khai báo biến WEIGHT_COL
+                    'Total_Weight': (WEIGHT_COL, 'sum') 
                 }
                 
                 matrix_data = df_clean.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
@@ -1220,8 +1222,6 @@ if uploaded_file is not None:
                 """
                 components.html(capture_component, height=max(300, len(prod_periods)*75 + 100), scrolling=True)
                 st.caption("Matrix Logic: Deduplicated Data | L=Length | W=Weight | Scrap% = Severity")
-                st.markdown("---")
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
                 st.markdown("---")
                 
                 # Heatmap & Grade Distribution Analysis
