@@ -29,28 +29,50 @@ GLOBAL_SPECS = {0.5: {}, 0.6: {}, 0.8: {}}
 target_thicks = [0.5, 0.6, 0.8]
 
 for t in target_thicks:
-    with st.sidebar.expander(f"📏 Limits for {t}mm"):
-        for feat in ['YS', 'TS', 'EL', 'YPE']:
-            st.caption(f"**{feat}**")
-            c1, c2, c3 = st.columns(3)
-            min_v = c1.number_input("Min", value=None, key=f"{t}_{feat}_min", label_visibility="collapsed", placeholder="Min")
-            max_v = c2.number_input("Max", value=None, key=f"{t}_{feat}_max", label_visibility="collapsed", placeholder="Max")
-            tgt_v = c3.number_input("Tgt", value=None, key=f"{t}_{feat}_tgt", label_visibility="collapsed", placeholder="Tgt")
-            GLOBAL_SPECS[t][feat] = {'min': min_v, 'max': max_v, 'target': tgt_v}
+    with st.sidebar.expander(f"📏 Limits for {t}mm"):
+        for feat in ['YS', 'TS', 'EL', 'YPE']:
+            st.caption(f"**{feat}**")
+            c1, c2, c3 = st.columns(3)
+            min_v = c1.number_input("Min", value=None, key=f"{t}_{feat}_min", label_visibility="collapsed", placeholder="Min")
+            max_v = c2.number_input("Max", value=None, key=f"{t}_{feat}_max", label_visibility="collapsed", placeholder="Max")
+            tgt_v = c3.number_input("Tgt", value=None, key=f"{t}_{feat}_tgt", label_visibility="collapsed", placeholder="Tgt")
+            GLOBAL_SPECS[t][feat] = {'min': min_v, 'max': max_v, 'target': tgt_v}
 
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
-    df.columns = df.columns.astype(str).str.strip()
+    df = pd.read_excel(uploaded_file)
+    df.columns = df.columns.astype(str).str.strip()
 
-    # --- 1. DATA PRE-PROCESSING ---
-    # Handle Dates & Time Grouping First
-    date_key = '烤三生產日期' 
+    # --- 1. DATA PRE-PROCESSING ---
+    # Handle Dates & Time Grouping First
+    date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
         
+        def categorize_period(d):
+            if pd.isnull(d): return "Unknown"
+            y = d.year
+            q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
+            
+            if y == 2024: return "2024 (Full Year)"
+            if y == 2025:
+                if d < q3_s: return "2025 H1 (Until 06/28)"
+                if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
+                return d.strftime('%Y-%m')
+            if y >= 2026: return d.strftime('%Y-%m')
+            return "Other"
+            
+        df['Time_Group'] = df['Production_Date'].apply(categorize_period)
+        df = df[df['Time_Group'] != "Other"]
+        
+        df_25 = df[df['Production_Date'].dt.year == 2025].copy()
+        if not df_25.empty:
+            df_25['Time_Group'] = "2025 (Full Year)"
+            df = pd.concat([df, df_25], ignore_index=True)
+    else:
+        df['Time_Group'] = "Unknown"
 
     # Robust Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
@@ -1080,155 +1102,103 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # Production vs Usage Quality Matrix
-                st.subheader("Production vs Usage Quality Matrix (Main Chart)")
-                st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
+                st.subheader("Production vs Usage Quality Matrix (Main Chart)")
+                st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                # 1. KÊNH DỮ LIỆU: Thêm cột Trọng Lượng (重量)
-                WEIGHT_COL = '重量'
-                if WEIGHT_COL in df_t6.columns:
-                    df_t6[WEIGHT_COL] = pd.to_numeric(df_t6[WEIGHT_COL], errors='coerce').fillna(0)
-                else:
-                    df_t6[WEIGHT_COL] = 0.0
+                available_grades = [g for g in base_grades if g in df_t6.columns]
+                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
+                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
-                available_grades = [g for g in base_grades if g in df_t6.columns]
-                
-                # Cập nhật agg_dict để tính tổng cả Trọng Lượng
-                agg_dict = {
-                    'Total_Length': (LEN_COL, 'sum'), 
-                    'Total_Scrap': (SCRAP_COL, 'sum'), 
-                    'Total_Coils': ('Total_Qty', 'sum'),
-                    'Total_Weight': (WEIGHT_COL, 'sum') # <-- THÊM MỚI
-                }
-                
-                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
-                matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
+                matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
+                usage_months = sorted(matrix_data['Usage_Month'].unique())
+                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
 
-                matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
-                usage_months = sorted(matrix_data['Usage_Month'].unique())
-                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
+                def get_color(rate):
+                    if pd.isna(rate): return "#ffffff" 
+                    if rate < 2.0: return "#e8f5e9" 
+                    if rate < 5.0: return "#fff3e0" 
+                    if rate < 10.0: return "#ffcdd2" 
+                    return "#e57373" 
 
-                # 2. TÍNH TOÁN CÁC Ô SUMMARY (Dòng & Cột)
-                # Tổng theo từng mốc Sản xuất (Dùng cho Cột Summary bên phải)
-                prod_summary = matrix_data.groupby('Time_Group').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
-                # Tổng theo từng tháng Sử dụng (Dùng cho Dòng Summary bên dưới)
-                usage_summary = matrix_data.groupby('Usage_Month').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
+                matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
 
-                def get_color(rate):
-                    if pd.isna(rate): return "#ffffff" 
-                    if rate < 2.0: return "#e8f5e9" 
-                    if rate < 5.0: return "#fff3e0" 
-                    if rate < 10.0: return "#ffcdd2" 
-                    return "#e57373" 
+                html_parts = [
+                    "<style>",
+                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
+                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
+                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
+                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
+                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
+                    ".grade-list li { display: flex; justify-content: space-between; }",
+                    ".grade-name { font-weight: bold; color: #444; }",
+                    "</style>",
+                    "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
+                ]
+                html_parts.extend([f"<th>{m}</th>" for m in usage_months])
+                html_parts.append("</tr></thead><tbody>")
 
-                matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
+                for prod in prod_periods:
+                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
+                    for usage in usage_months:
+                        row = matrix_dict.get((prod, usage))
+                        if not row:
+                            html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
+                        else:
+                            scrap_rate = row['Scrap_Rate']
+                            bg_color = get_color(scrap_rate)
+                            grade_html = []
+                            total_coils = row.get('Total_Coils', 0)
+                            if total_coils > 0:
+                                for g in available_grades:
+                                    g_pct = (row.get(g, 0) / total_coils * 100)
+                                    if g_pct > 0:
+                                        color = "green" if "A" in g else "red"
+                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
+                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
+                    html_parts.append("</tr>")
+                html_parts.append("</tbody></table>")
 
-                # 3. XÂY DỰNG HTML MATRIX MỚI (CÓ THÊM DÒNG/CỘT SUMMARY)
-                html_parts = [
-                    "<style>",
-                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
-                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
-                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
-                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
-                    ".grade-list li { display: flex; justify-content: space-between; }",
-                    ".grade-name { font-weight: bold; color: #444; }",
-                    ".sum-cell { background-color: #f8f9fa; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 13px; line-height: 1.6;}",
-                    ".sum-header { background-color: #0d47a1 !important; color: white; font-weight: bold; }",
-                    "</style>",
-                    "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
-                ]
-                
-                # Render header columns (tháng sử dụng)
-                html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                # THÊM MỚI: Header cho cột Summary bên phải
-                html_parts.append("<th class='sum-header' style='border-left: 2px solid #222;'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
-
-                # Render các dòng dữ liệu chính
-                for prod in prod_periods:
-                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
-                    for usage in usage_months:
-                        row = matrix_dict.get((prod, usage))
-                        if not row:
-                            html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
-                        else:
-                            scrap_rate = row['Scrap_Rate']
-                            bg_color = get_color(scrap_rate)
-                            grade_html = []
-                            total_coils = row.get('Total_Coils', 0)
-                            if total_coils > 0:
-                                for g in available_grades:
-                                    g_pct = (row.get(g, 0) / total_coils * 100)
-                                    if g_pct > 0:
-                                        color = "green" if "A" in g else "red"
-                                        grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
-                    
-                    # THÊM MỚI: Ô dữ liệu cho cột Summary bên phải (Tính tổng Chiều dài & Trọng lượng xuất ra)
-                    p_tot = prod_summary.get(prod, {'Total_Length': 0, 'Total_Weight': 0})
-                    html_parts.append(f"<td class='sum-cell' style='border-left: 2px solid #222;'>"
-                                      f"L: {p_tot['Total_Length']:,.0f}<br>"
-                                      f"W: {p_tot['Total_Weight']:,.0f}</td>")
-                    html_parts.append("</tr>")
-
-                # THÊM MỚI: Dòng Summary ở dưới cùng (Total Usage / Khách hàng sử dụng)
-                html_parts.append("<tr><th class='sum-header' style='border-top: 2px solid #222;'>Total Usage<br>(客戶使用量)</th>")
-                for usage in usage_months:
-                    u_tot = usage_summary.get(usage, {'Total_Length': 0, 'Total_Weight': 0})
-                    html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222;'>"
-                                      f"L: {u_tot['Total_Length']:,.0f}<br>"
-                                      f"W: {u_tot['Total_Weight']:,.0f}</td>")
-                
-                # THÊM MỚI: Ô Grand Total (Góc dưới cùng bên phải)
-                grand_len = sum(u['Total_Length'] for u in usage_summary.values())
-                grand_wt = sum(u['Total_Weight'] for u in usage_summary.values())
-                html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; border-left: 2px solid #222; background-color: #e3f2fd;'>"
-                                  f"L: {grand_len:,.0f}<br>"
-                                  f"W: {grand_wt:,.0f}</td></tr>")
-
-                html_parts.append("</tbody></table>")
-
-                matrix_html_str = "".join(html_parts)
-                
-                # HTML Component để chụp ảnh (Giữ nguyên như cũ)
-                capture_component = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                    <style>
-                        body {{ font-family: sans-serif; margin: 0; padding: 0; }}
-                        .btn-capture {{
-                            background-color: #FF4B4B; color: white; border: none; padding: 10px;
-                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
-                            margin-bottom: 10px; transition: 0.3s; width: 100%;
-                        }}
-                        .btn-capture:hover {{ background-color: #ff3333; }}
-                    </style>
-                </head>
-                <body>
-                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart</button>
-                    <div id="matrix-container" style="background: white; padding: 10px; display: inline-block; width: 100%;">
-                        {matrix_html_str}
-                    </div>
-                    <script>
-                        function takeSnapshot() {{
-                            const target = document.getElementById('matrix-container');
-                            html2canvas(target, {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
-                                let link = document.createElement('a');
-                                link.download = 'Quality_Matrix.png';
-                                link.href = canvas.toDataURL('image/png');
-                                link.click();
-                            }});
-                        }}
-                    </script>
-                </body>
-                </html>
-                """
-                components.html(capture_component, height=max(250, len(prod_periods)*65 + 150), scrolling=True)
-                
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity. **Summary L: Length, W: Weight**")
-                st.markdown("---")
+                matrix_html_str = "".join(html_parts)
+                capture_component = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                    <style>
+                        body {{ font-family: sans-serif; margin: 0; padding: 0; }}
+                        .btn-capture {{
+                            background-color: #FF4B4B; color: white; border: none; padding: 10px;
+                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
+                            margin-bottom: 10px; transition: 0.3s; width: 100%;
+                        }}
+                        .btn-capture:hover {{ background-color: #ff3333; }}
+                    </style>
+                </head>
+                <body>
+                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart</button>
+                    <div id="matrix-container" style="background: white; padding: 10px; display: inline-block; width: 100%;">
+                        {matrix_html_str}
+                    </div>
+                    <script>
+                        function takeSnapshot() {{
+                            const target = document.getElementById('matrix-container');
+                            html2canvas(target, {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
+                                let link = document.createElement('a');
+                                link.download = 'Quality_Matrix.png';
+                                link.href = canvas.toDataURL('image/png');
+                                link.click();
+                            }});
+                        }}
+                    </script>
+                </body>
+                </html>
+                """
+                components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
+                
+                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
+                st.markdown("---")
                 
                 # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
