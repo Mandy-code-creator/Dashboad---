@@ -7,7 +7,10 @@ import io
 import seaborn as sns
 import streamlit.components.v1 as components
 from PIL import Image
-
+from docx import Document
+from docx.shared import Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
 # --- CONFIGURATION ---
 Image.MAX_IMAGE_PIXELS = None
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
