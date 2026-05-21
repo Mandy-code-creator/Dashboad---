@@ -1101,64 +1101,35 @@ if uploaded_file is not None:
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
                 st.markdown("---")
                 
-                # Production vs Usage Quality Matrix (Main Chart)
+                # Production vs Usage Quality Matrix
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
-                
-                # --- 1. CẤU HÌNH CỘT (CẦN SỬA ĐOẠN NÀY) ---
-                # Kiểm tra trong dataframe df_t6 của bạn xem cột trọng lượng tên là gì và sửa ở đây
-                WEIGHT_COL = '重量'  # <--- VÍ DỤ: Nếu cột trong file là 'Weight', hãy sửa thành 'Weight'
-                id_col_name = '鋼捲號碼' 
-                
-                # --- 2. TỐI ƯU DỮ LIỆU ---
-                # Khử trùng lặp
-                df_clean = df_t6.drop_duplicates(subset=[id_col_name], keep='first').copy()
-                
-                # Logic phân nhóm thời gian
-                def get_sort_key(val):
-                    mapping = {
-                        "2024 (Full Year)": 0,
-                        "2025 H1 (Until 06/28)": 1,
-                        "2025 Q3 (06/29 ~ 09/30)": 2,
-                        "2025-10": 3,
-                        "2025-11": 4
-                    }
-                    return mapping.get(val, 99)
-                
-                # --- 3. TÍNH TOÁN DỮ LIỆU ---
-                available_grades = [g for g in base_grades if g in df_clean.columns]
-                agg_dict = {
-                    'Total_Length': (LEN_COL, 'sum'), 
-                    'Total_Scrap': (SCRAP_COL, 'sum'), 
-                    'Total_Coils': ('Total_Qty', 'sum'),
-                    'Total_Weight': (WEIGHT_COL, 'sum') 
-                }
-                
-                matrix_data = df_clean.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                grade_data = df_clean.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+
+                available_grades = [g for g in base_grades if g in df_t6.columns]
+                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
+                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                 matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
-                
+
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
-                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key)
-                
+                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
+
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
                     if rate < 2.0: return "#e8f5e9" 
                     if rate < 5.0: return "#fff3e0" 
                     if rate < 10.0: return "#ffcdd2" 
                     return "#e57373" 
-                
+
                 matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
-                
-                # --- 4. RENDER HTML ---
+
                 html_parts = [
                     "<style>",
                     ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
                     ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
                     ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 2px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
-                    ".cell-stats { font-size: 10px; color: #555; text-align: center; font-style: italic; margin-bottom: 5px; }",
+                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
                     ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
                     ".grade-list li { display: flex; justify-content: space-between; }",
                     ".grade-name { font-weight: bold; color: #444; }",
@@ -1167,7 +1138,7 @@ if uploaded_file is not None:
                 ]
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
                 html_parts.append("</tr></thead><tbody>")
-                
+
                 for prod in prod_periods:
                     html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
                     for usage in usage_months:
@@ -1176,10 +1147,7 @@ if uploaded_file is not None:
                             html_parts.append("<td style='background-color: #fafafa; color: #aaa; text-align:center; vertical-align:middle;'>No Data</td>")
                         else:
                             scrap_rate = row['Scrap_Rate']
-                            total_len = row['Total_Length']
-                            total_wt = row['Total_Weight']
                             bg_color = get_color(scrap_rate)
-                            
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             if total_coils > 0:
@@ -1188,12 +1156,10 @@ if uploaded_file is not None:
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                            
-                            stats_display = f"<div class='cell-stats'>L: {total_len:,.0f}m | W: {total_wt:,.0f}kg</div>"
-                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div>{stats_display}<ul class='grade-list'>{''.join(grade_html)}</ul></td>")
+                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     html_parts.append("</tr>")
                 html_parts.append("</tbody></table>")
-                
+
                 matrix_html_str = "".join(html_parts)
                 capture_component = f"""
                 <!DOCTYPE html>
@@ -1202,15 +1168,23 @@ if uploaded_file is not None:
                     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                     <style>
                         body {{ font-family: sans-serif; margin: 0; padding: 0; }}
-                        .btn-capture {{ background-color: #FF4B4B; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px; margin-bottom: 10px; width: 100%; }}
+                        .btn-capture {{
+                            background-color: #FF4B4B; color: white; border: none; padding: 10px;
+                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
+                            margin-bottom: 10px; transition: 0.3s; width: 100%;
+                        }}
+                        .btn-capture:hover {{ background-color: #ff3333; }}
                     </style>
                 </head>
                 <body>
                     <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart</button>
-                    <div id="matrix-container" style="background: white; padding: 10px; width: 100%;">{matrix_html_str}</div>
+                    <div id="matrix-container" style="background: white; padding: 10px; display: inline-block; width: 100%;">
+                        {matrix_html_str}
+                    </div>
                     <script>
                         function takeSnapshot() {{
-                            html2canvas(document.getElementById('matrix-container'), {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
+                            const target = document.getElementById('matrix-container');
+                            html2canvas(target, {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
                                 let link = document.createElement('a');
                                 link.download = 'Quality_Matrix.png';
                                 link.href = canvas.toDataURL('image/png');
@@ -1221,8 +1195,9 @@ if uploaded_file is not None:
                 </body>
                 </html>
                 """
-                components.html(capture_component, height=max(300, len(prod_periods)*75 + 100), scrolling=True)
-                st.caption("Matrix Logic: Deduplicated Data | L=Length | W=Weight | Scrap% = Severity")
+                components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
+                
+                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
                 st.markdown("---")
                 
                 # Heatmap & Grade Distribution Analysis
