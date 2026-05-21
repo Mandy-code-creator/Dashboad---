@@ -8,15 +8,12 @@ import seaborn as sns
 import streamlit.components.v1 as components
 from PIL import Image
 
-# --- FIX: Tắt giới hạn pixel để tránh lỗi DecompressionBombError ---
+# --- CONFIGURATION ---
 Image.MAX_IMAGE_PIXELS = None
-
-# --- PAGE CONFIG ---
 st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
-# --- FIX: Tối ưu DPI cho Web để tiết kiệm RAM (vẫn giữ 300 DPI cho tải xuống) ---
 plt.rcParams['figure.dpi'] = 120
 plt.rcParams['savefig.dpi'] = 300
 plt.rcParams['savefig.bbox'] = 'tight'
@@ -45,7 +42,6 @@ if uploaded_file is not None:
     df.columns = df.columns.astype(str).str.strip()
 
     # --- 1. DATA PRE-PROCESSING ---
-    # Handle Dates & Time Grouping First
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -74,7 +70,6 @@ if uploaded_file is not None:
     else:
         df['Time_Group'] = "Unknown"
 
-    # Robust Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
     for g in base_grades:
         match_cols = []
@@ -91,10 +86,8 @@ if uploaded_file is not None:
     target_grades = ['A-B+', 'A-B']
     df['Valid_Qty'] = df[target_grades].sum(axis=1)
 
-    # STORE ORIGINAL DATA FOR GRADE DISTRIBUTION (Unfiltered by thickness)
     df_global_grades = df[df['Total_Qty'] > 0].copy()
 
-    # Handle Thickness & Filtering for Detailed Charts
     if 'Actual_Thickness' not in df.columns:
         if 'Thickness' in df.columns:
             df.rename(columns={'Thickness': 'Actual_Thickness'}, inplace=True)
@@ -161,7 +154,7 @@ if uploaded_file is not None:
             spine.set_color('#333333')
             spine.set_linewidth(1.0)
 
-    # --- SPC & CAPABILITY HELPER FUNCTIONS ---
+    # --- SPC HELPER FUNCTIONS ---
     def is_valid_for_control(period_label):
         if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
             return False
@@ -390,7 +383,7 @@ if uploaded_file is not None:
         "📉 4. I-MR Tracking",
         "✂️ 5. Tail Scrap",
         "🎯 6. Customer End-Use",
-        "🏭 7. Production-Based Scrap & Material Stability"
+        "🏭 7. Production-Based Scrap"
     ])
 
     # ==========================================================
@@ -515,7 +508,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_g.tight_layout()
             st.pyplot(fig_g)
-            plt.close(fig_g)  # FIX: Ngăn sập RAM
+            plt.close(fig_g)
 
         st.markdown("---")
         st.subheader("Charts by Period & Thickness")
@@ -539,7 +532,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_y.tight_layout()
             st.pyplot(fig_y)
-            plt.close(fig_y)  # FIX: Ngăn sập RAM
+            plt.close(fig_y)
             
         with col_c2:
             st.markdown("**Defect Rate (%) by Period & Thickness**")
@@ -561,7 +554,7 @@ if uploaded_file is not None:
             plt.xticks(rotation=30, ha='right')
             fig_d.tight_layout()
             st.pyplot(fig_d)
-            plt.close(fig_d)  # FIX: Ngăn sập RAM
+            plt.close(fig_d)
 
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
@@ -636,7 +629,7 @@ if uploaded_file is not None:
                     plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
                     fig.tight_layout()
                     st.pyplot(fig)
-                    plt.close(fig)  # FIX: Ngăn sập RAM
+                    plt.close(fig)
             
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
@@ -656,7 +649,7 @@ if uploaded_file is not None:
                         plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
                         fig.tight_layout()
                         st.pyplot(fig)
-                        plt.close(fig)  # FIX: Ngăn sập RAM
+                        plt.close(fig)
             st.markdown("---")
 
     # ==========================================================
@@ -713,12 +706,10 @@ if uploaded_file is not None:
                 # I-Chart
                 ax_i.plot(vals, marker='o', color='#1f77b4', linestyle='-', linewidth=1.5, markersize=5)
                 
-                # Statistical Control Limits
                 ax_i.axhline(mean_v, color='green', linestyle='--', label=f'Mean: {mean_v:.2f}')
                 ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
                 ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
                 
-                # User Input Specification Limits (USL/LSL/Target)
                 spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {}) if t4_thick != 'Overall' else {}
                 lsl = spec.get('min')
                 usl = spec.get('max')
@@ -731,7 +722,6 @@ if uploaded_file is not None:
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
                 
-                # Catch out of bounds errors
                 out_condition = (vals > ucl_i) | (vals < lcl_i)
                 
                 if usl is not None:
@@ -778,7 +768,7 @@ if uploaded_file is not None:
                 
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
-                plt.close(fig_imr)  # FIX: Ngăn sập RAM
+                plt.close(fig_imr)
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
@@ -789,7 +779,6 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            # Drop full year summary to avoid noise
             df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
@@ -805,7 +794,6 @@ if uploaded_file is not None:
                 scrap_totals, on=[COIL_ID_COL, 'Time_Group']
             )
 
-            # --- 1. HYBRID TREND LINE ---
             st.subheader("Rejection Rate Trend (%)")
             
             trend_data = df_scrap_master.groupby('Time_Group').agg(
@@ -830,8 +818,7 @@ if uploaded_file is not None:
                               marker='o', markersize=8, markeredgecolor='white', markeredgewidth=1.5,
                               linestyle='-', color='#1f77b4', linewidth=3, label='Rejection Rate %')
                 
-                ax_trend.fill_between(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], 
-                                      color='#1f77b4', alpha=0.1)
+                ax_trend.fill_between(trend_data['Time_Group'], trend_data['Rejection_Rate (%)'], color='#1f77b4', alpha=0.1)
 
                 y_max = trend_data['Rejection_Rate (%)'].max()
                 ax_trend.set_ylim(0, y_max * 1.35 + 0.5 if not trend_data.empty else 10)
@@ -845,9 +832,7 @@ if uploaded_file is not None:
                 
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
                     ax_trend.annotate(f'{val:.2f}%', 
-                                      xy=(i, val), 
-                                      xytext=(0, 8), 
-                                      textcoords="offset points", 
+                                      xy=(i, val), xytext=(0, 8), textcoords="offset points", 
                                       ha='center', va='bottom', 
                                       fontsize=10, fontweight='bold', color='#222',
                                       bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
@@ -857,9 +842,8 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
-            plt.close(fig_trend)  # FIX: Ngăn sập RAM
+            plt.close(fig_trend)
 
-            # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
             st.subheader("Scrap Rate by Time Period")
             scrap_by_period = df_scrap_master.groupby('Time_Group').agg(
@@ -891,7 +875,7 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_p.tight_layout()
             st.pyplot(fig_p)
-            plt.close(fig_p)  # FIX: Ngăn sập RAM
+            plt.close(fig_p)
 
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
@@ -899,7 +883,6 @@ if uploaded_file is not None:
                 use_container_width=True, hide_index=True
             )
 
-            # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
             st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
             
@@ -940,7 +923,7 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_t.tight_layout()
                 st.pyplot(fig_t)
-                plt.close(fig_t)  # FIX: Ngăn sập RAM
+                plt.close(fig_t)
 
             with col_m:
                 st.markdown("**Scrap Rate by Period & Material**")
@@ -968,7 +951,7 @@ if uploaded_file is not None:
                 plt.xticks(rotation=30, ha='right')
                 fig_m.tight_layout()
                 st.pyplot(fig_m)
-                plt.close(fig_m)  # FIX: Ngăn sập RAM
+                plt.close(fig_m)
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
             scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
@@ -980,10 +963,8 @@ if uploaded_file is not None:
             )
 
         else:
-            st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
+            st.warning("Required columns for Scrap Analysis not found in the file.")
             
-    # ==========================================================
-    # ==========================================================
     # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
@@ -1000,11 +981,9 @@ if uploaded_file is not None:
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
-            # --- LỌC DỮ LIỆU: Chỉ giữ lại từ Q4/2025 trở đi trên trục Production Period ---
             old_periods = ["2024 (Full Year)", "2025 (Full Year)", "2025 H1 (Until 06/28)", "2025 Q3 (06/29 - 09/30)"]
             df_t6 = df_t6[~df_t6['Time_Group'].isin(old_periods)]
 
-            # Vectorized Date Parsing
             if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
                 df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
             else:
@@ -1013,33 +992,26 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            # Filter Usage Month from Q4/2025 onwards
             df_t6 = df_t6[df_t6['Usage_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
 
             if df_t6.empty:
                 st.warning("No usage data available for materials produced from Q4/2025 onwards.")
             else:
-                # Machine Transition Classification
                 cutoff_date = pd.to_datetime('2026-04-01')
                 df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
-                # Process Actual Values for accurate averages (remove zero or sub-zero values)
                 props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
                 if props_cols:
                     df_t6[props_cols] = df_t6[props_cols].apply(pd.to_numeric, errors='coerce')
                     df_t6[props_cols] = df_t6[props_cols].where(df_t6[props_cols] > 0, np.nan)
 
-                # Monthly Scrap & Material Stability Analysis
                 st.subheader("Monthly Scrap & Material Stability Analysis")
-                st.caption("Verifying if the spike in scrap correlates with material instability.")
-
+                
                 macro_df = df_t6.groupby('Usage_Month').agg(
                     Total_Length=(LEN_COL, 'sum'), 
                     Total_Scrap=(SCRAP_COL, 'sum'),
-                    Avg_YS=('YS', 'mean'),
-                    Avg_TS=('TS', 'mean'),
-                    Avg_EL=('EL', 'mean'),
-                    Avg_YPE=('YPE', 'mean')
+                    Avg_YS=('YS', 'mean'), Avg_TS=('TS', 'mean'),
+                    Avg_EL=('EL', 'mean'), Avg_YPE=('YPE', 'mean')
                 ).reset_index().sort_values('Usage_Month')
                 
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
@@ -1083,27 +1055,14 @@ if uploaded_file is not None:
                             
                         fig_exec.tight_layout()
                         st.pyplot(fig_exec)
-                        
-                        buf = io.BytesIO()
-                        fig_exec.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-                        buf.seek(0)
-                        st.download_button(
-                            label=f"📸 Download {label} Chart",
-                            data=buf,
-                            file_name=f"Scrap_vs_{col_name}.png",
-                            mime="image/png",
-                            type="primary",
-                            use_container_width=True,
-                            key=f"dl_chart_{idx}" 
-                        )
-                        plt.close(fig_exec) # Đảm bảo đóng biểu đồ để giải phóng RAM
+                        plt.close(fig_exec)
 
-                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
+                st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with Customer's Machine.</div>", unsafe_allow_html=True)
                 st.markdown("---")
                 
-                # Production vs Usage Quality Matrix
+                # --- QUALITY MATRIX ---
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
-                st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
+                st.info("Download explicitly scaled to A4 Landscape proportions.")
 
                 WEIGHT_COL = '重量'
                 if WEIGHT_COL in df_t6.columns:
@@ -1129,6 +1088,11 @@ if uploaded_file is not None:
                 prod_summary = matrix_data.groupby('Time_Group').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
                 usage_summary = matrix_data.groupby('Usage_Month').agg({'Total_Length': 'sum', 'Total_Weight': 'sum'}).to_dict('index')
 
+                total_prod_length = sum(p['Total_Length'] for p in prod_summary.values())
+                total_prod_weight = sum(p['Total_Weight'] for p in prod_summary.values())
+                total_usage_length = sum(u['Total_Length'] for u in usage_summary.values())
+                total_usage_weight = sum(u['Total_Weight'] for u in usage_summary.values())
+
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
                     if rate < 2.0: return "#e8f5e9" 
@@ -1140,21 +1104,32 @@ if uploaded_file is not None:
 
                 html_parts = [
                     "<style>",
-                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
-                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 10px; text-align: center; border: 1px solid #ddd; }",
-                    ".q-matrix td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }",
-                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 5px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 3px;}",
-                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
+                    ".a4-container { width: 1080px; padding: 20px; margin: auto; background: white; box-sizing: border-box; page-break-inside: avoid; }",
+                    ".report-title { text-align: center; color: #1a3a5c; margin-top: 0; font-family: sans-serif; font-size: 22px; }",
+                    ".summary-box { display: flex; justify-content: space-between; background-color: #f1f3f5; padding: 15px; margin-bottom: 15px; border-left: 5px solid #1a3a5c; font-family: sans-serif; font-size: 16px; font-weight: bold; }",
+                    ".summary-item { text-align: center; color: #333; }",
+                    ".summary-val { color: #d62728; font-size: 20px; display: block; margin-top: 5px; }",
+                    ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 11.5px; }",
+                    ".q-matrix th { background-color: #1a3a5c; color: white; padding: 8px; text-align: center; border: 1px solid #ddd; font-size: 12.5px; }",
+                    ".q-matrix td { border: 1px solid #ccc; padding: 6px; vertical-align: top; }",
+                    ".cell-title { font-size: 14px; font-weight: bold; margin-bottom: 3px; color: #111; text-align: center; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 2px;}",
+                    ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.3; }",
                     ".grade-list li { display: flex; justify-content: space-between; }",
                     ".grade-name { font-weight: bold; color: #444; }",
-                    ".sum-cell { background-color: #f8f9fa; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 12px; line-height: 1.6;}",
-                    ".sum-header { background-color: #0d47a1 !important; color: white; font-weight: bold; }",
+                    ".sum-cell { background-color: #f8f9fa; font-weight: bold; text-align: center; vertical-align: middle !important; color: #0d47a1; font-size: 12px; line-height: 1.5; border-left: 2px solid #222; }",
+                    ".sum-header { background-color: #0d47a1 !important; color: white; font-weight: bold; border-left: 2px solid #222; }",
                     "</style>",
+                    "<div class='a4-container' id='capture-area'>",
+                    "<h2 class='report-title'>QUALITY MATRIX & MATERIAL FLOW REPORT (品質矩陣與材料流向報告)</h2>",
+                    f"<div class='summary-box'>",
+                    f"<div class='summary-item'>Total Produced (生產總量)<span class='summary-val'>L: {total_prod_length:,.0f} m | W: {total_prod_weight:,.0f} T</span></div>",
+                    f"<div class='summary-item'>Total Customer Usage (客戶使用總量)<span class='summary-val'>L: {total_usage_length:,.0f} m | W: {total_usage_weight:,.0f} T</span></div>",
+                    f"</div>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
                 
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
-                html_parts.append("<th class='sum-header' style='border-left: 2px solid #222;'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
+                html_parts.append("<th class='sum-header'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
 
                 for prod in prod_periods:
                     html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
@@ -1176,25 +1151,25 @@ if uploaded_file is not None:
                             html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     
                     p_tot = prod_summary.get(prod, {'Total_Length': 0, 'Total_Weight': 0})
-                    html_parts.append(f"<td class='sum-cell' style='border-left: 2px solid #222;'>"
+                    html_parts.append(f"<td class='sum-cell'>"
                                       f"L: {p_tot['Total_Length']:,.0f}<br>"
                                       f"W: {p_tot['Total_Weight']:,.0f}</td>")
                     html_parts.append("</tr>")
 
-                html_parts.append("<tr><th class='sum-header' style='border-top: 2px solid #222;'>Total Usage<br>(客戶使用量)</th>")
+                html_parts.append("<tr><th class='sum-header' style='border-top: 2px solid #222; border-left: 0;'>Total Usage<br>(客戶使用量)</th>")
                 for usage in usage_months:
                     u_tot = usage_summary.get(usage, {'Total_Length': 0, 'Total_Weight': 0})
-                    html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222;'>"
+                    html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; border-left: 0;'>"
                                       f"L: {u_tot['Total_Length']:,.0f}<br>"
                                       f"W: {u_tot['Total_Weight']:,.0f}</td>")
                 
                 grand_len = sum(u['Total_Length'] for u in usage_summary.values())
                 grand_wt = sum(u['Total_Weight'] for u in usage_summary.values())
-                html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; border-left: 2px solid #222; background-color: #e3f2fd;'>"
+                html_parts.append(f"<td class='sum-cell' style='border-top: 2px solid #222; background-color: #e3f2fd;'>"
                                   f"L: {grand_len:,.0f}<br>"
                                   f"W: {grand_wt:,.0f}</td></tr>")
 
-                html_parts.append("</tbody></table>")
+                html_parts.append("</tbody></table></div>")
 
                 matrix_html_str = "".join(html_parts)
                 
@@ -1204,26 +1179,29 @@ if uploaded_file is not None:
                 <head>
                     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                     <style>
-                        body {{ font-family: sans-serif; margin: 0; padding: 0; }}
+                        body {{ font-family: sans-serif; margin: 0; padding: 0; background: #f0f2f6; }}
                         .btn-capture {{
-                            background-color: #FF4B4B; color: white; border: none; padding: 10px;
-                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px;
-                            margin-bottom: 10px; transition: 0.3s; width: 100%;
+                            background-color: #FF4B4B; color: white; border: none; padding: 12px;
+                            border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px;
+                            margin: 10px auto; transition: 0.3s; display: block; width: 1080px; text-align: center;
                         }}
                         .btn-capture:hover {{ background-color: #ff3333; }}
                     </style>
                 </head>
                 <body>
-                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution Matrix Chart</button>
-                    <div id="matrix-container" style="background: white; padding: 10px; display: inline-block; width: 100%;">
-                        {matrix_html_str}
-                    </div>
+                    <button class="btn-capture" onclick="takeSnapshot()">📸 Download High-Resolution A4 Matrix Report</button>
+                    {matrix_html_str}
                     <script>
                         function takeSnapshot() {{
-                            const target = document.getElementById('matrix-container');
-                            html2canvas(target, {{ scale: 3, backgroundColor: '#ffffff' }}).then(canvas => {{
+                            const target = document.getElementById('capture-area');
+                            html2canvas(target, {{ 
+                                scale: 2, 
+                                backgroundColor: '#ffffff',
+                                width: target.offsetWidth,
+                                height: target.offsetHeight
+                            }}).then(canvas => {{
                                 let link = document.createElement('a');
-                                link.download = 'Quality_Matrix.png';
+                                link.download = 'Quality_Matrix_A4_Report.png';
                                 link.href = canvas.toDataURL('image/png');
                                 link.click();
                             }});
@@ -1232,12 +1210,11 @@ if uploaded_file is not None:
                 </body>
                 </html>
                 """
-                components.html(capture_component, height=max(250, len(prod_periods)*65 + 150), scrolling=True)
+                components.html(capture_component, height=max(350, len(prod_periods)*60 + 200), scrolling=True)
                 
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity. **Summary L: Length, W: Weight**")
                 st.markdown("---")
                 
-                # Heatmap & Grade Distribution Analysis
                 col_h1, col_h2 = st.columns(2)
 
                 with col_h1:
@@ -1250,20 +1227,7 @@ if uploaded_file is not None:
                     plt.xticks(rotation=45, ha='right')
                     fig_h1.tight_layout()
                     st.pyplot(fig_h1)
-                    
-                    buf_h1 = io.BytesIO()
-                    fig_h1.savefig(buf_h1, format="png", dpi=300, bbox_inches="tight")
-                    buf_h1.seek(0)
-                    st.download_button(
-                        label="📸 Download Heatmap",
-                        data=buf_h1,
-                        file_name="Scrap_Heatmap.png",
-                        mime="image/png",
-                        type="primary",
-                        use_container_width=True,
-                        key="dl_heatmap"
-                    )
-                    plt.close(fig_h1) # Đảm bảo đóng biểu đồ
+                    plt.close(fig_h1) 
                 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
@@ -1290,24 +1254,9 @@ if uploaded_file is not None:
                         add_chart_border(ax_g2)
                     fig_g2.tight_layout()
                     st.pyplot(fig_g2)
-                    
-                    buf_g2 = io.BytesIO()
-                    fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
-                    buf_g2.seek(0)
-                    st.download_button(
-                        label="📸 Download Grade Chart",
-                        data=buf_g2,
-                        file_name="Grade_Distribution.png",
-                        mime="image/png",
-                        type="primary",
-                        use_container_width=True,
-                        key="dl_grade"
-                    )
-                    plt.close(fig_g2) # Đảm bảo đóng biểu đồ
+                    plt.close(fig_g2) 
 
                 st.markdown("---")
-                
-                # 9 & 10. Split Coil Verification (Strongest Evidence)
                 st.subheader("9 & 10. Split Coil Verification")
                 st.info("Identifying identical coils processed on both machines to isolate machine impact.")
 
@@ -1317,7 +1266,6 @@ if uploaded_file is not None:
                 old_machine_col = 'Old Machine (< Apr 2026)'
                 new_machine_col = 'New Machine (>= Apr 2026)'
                 
-                # pivot().dropna() explicitly guarantees we strictly analyze coils used in BOTH time periods
                 split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna(subset=[old_machine_col, new_machine_col])
                 
                 if not split_pivot.empty:
@@ -1329,7 +1277,7 @@ if uploaded_file is not None:
                         (split_pivot[new_machine_col] > split_pivot[old_machine_col] + 5),
                         (split_pivot[old_machine_col] > 0) & (split_pivot[new_machine_col] == 0)
                     ]
-                    choices = ["🚨 Old Machine Issue (Proven)", "⚠️ Material / Process Issue", "⚙️ New Machine Tuning Issue", "✅ Improved on New Machine"]
+                    choices = ["🚨 Old Machine Issue", "⚠️ Material / Process Issue", "⚙️ New Machine Tuning Issue", "✅ Improved on New Machine"]
                     split_pivot['Root Cause Classification'] = np.select(conds, choices, default="✅ Normal / Stable")
                     
                     if props_cols:
@@ -1350,6 +1298,7 @@ if uploaded_file is not None:
                     st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
+    
     # ==========================================================
     # TASK 7: PRODUCTION-BASED SCRAP & MATERIAL STABILITY
     # ==========================================================
@@ -1357,31 +1306,20 @@ if uploaded_file is not None:
         st.header("7. Production-Based Scrap & Material Stability")
         st.info("Logic: Identifies unique coils to prevent length overcounting. Length is only counted for the first occurrence of repeated coils.")
 
-        # Tạo bản sao dữ liệu và tiền xử lý thời gian sản xuất
         df_t7 = df.dropna(subset=['Production_Date', COIL_ID_COL]).copy()
-        
-        # --- LỌC DỮ LIỆU TỪ QUÝ 3/2025 TRỞ ĐI ---
-        df_t7 = df_t7[df_t7['Production_Date'] >= pd.Timestamp(2025, 6, 29)] # Lấy từ Q3 2025
+        df_t7 = df_t7[df_t7['Production_Date'] >= pd.Timestamp(2025, 6, 29)] 
         
         df_t7['Prod_Month'] = df_t7['Production_Date'].dt.strftime('%Y-%m')
-        
-        # --- XỬ LÝ DỮ LIỆU LẶP (COIL DEDUPLICATION) ---
-        # Sắp xếp theo ngày sản xuất để xác định lần đầu tiên xuất hiện
         df_t7 = df_t7.sort_values([COIL_ID_COL, 'Production_Date'])
         
-        # Lấy bản ghi đầu tiên của mỗi cuộn để tính Chiều dài (Input Length)
         df_unique_first = df_t7.drop_duplicates(subset=[COIL_ID_COL], keep='first')
         monthly_input_len = df_unique_first.groupby('Prod_Month')[LEN_COL].sum()
         
-        # Tính tổng Scrap (Cộng dồn tất cả các lần phát sinh scrap của cuộn đó)
         monthly_total_scrap = df_t7.groupby('Prod_Month')[SCRAP_COL].sum()
         
-        # Tính giá trị trung bình của cơ tính (Actual Values)
-        # Sử dụng toàn bộ dữ liệu để có cái nhìn tổng quát về độ biến động
         prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t7.columns]
         monthly_props = df_t7.groupby('Prod_Month')[prop_cols].mean()
         
-        # Gộp dữ liệu phân tích
         t7_summary = pd.DataFrame({
             'Input_Length': monthly_input_len,
             'Total_Scrap': monthly_total_scrap
@@ -1393,7 +1331,6 @@ if uploaded_file is not None:
             0
         ).round(2)
 
-        # --- HIỂN THỊ BIỂU ĐỒ TƯƠNG QUAN ---
         st.subheader("Correlation: Scrap Rate vs. Actual Values (Factory Date)")
         
         t7_row1 = st.columns(2)
@@ -1412,14 +1349,12 @@ if uploaded_file is not None:
                 with t7_cols[idx]:
                     fig_t7, ax1 = plt.subplots(figsize=(7, 4.5))
                     
-                    # Trục trái: Scrap Rate
                     ax1.set_xlabel('Production Month')
                     ax1.set_ylabel('Scrap Rate (%)', color='#d62728', fontweight='bold')
                     ax1.plot(t7_summary['Prod_Month'], t7_summary['Scrap_Rate (%)'], 
                             color='#d62728', marker='o', linewidth=2.5, label='Scrap Rate')
                     ax1.tick_params(axis='y', labelcolor='#d62728')
                     
-                    # Trục phải: Actual Property
                     ax2 = ax1.twinx()
                     ax2.set_ylabel(label, color=color, fontweight='bold')
                     ax2.plot(t7_summary['Prod_Month'], t7_summary[feat_id], 
@@ -1434,23 +1369,8 @@ if uploaded_file is not None:
                         
                     fig_t7.tight_layout()
                     st.pyplot(fig_t7)
-                    
-                    # Nút tải ảnh chất lượng cao cho Task 7
-                    buf_t7 = io.BytesIO()
-                    fig_t7.savefig(buf_t7, format="png", dpi=300, bbox_inches="tight")
-                    buf_t7.seek(0)
-                    st.download_button(
-                        label=f"📸 Download {label} Chart",
-                        data=buf_t7,
-                        file_name=f"Prod_Scrap_vs_{feat_id}.png",
-                        mime="image/png",
-                        type="primary",
-                        use_container_width=True,
-                        key=f"dl_t7_chart_{idx}" 
-                    )
-                    plt.close(fig_t7) # FIX: Ngăn sập RAM
+                    plt.close(fig_t7) 
 
-        # Hiển thị bảng dữ liệu chi tiết
         st.markdown("### Production Monthly Analytics Data")
         st.dataframe(
             t7_summary.style.format({
