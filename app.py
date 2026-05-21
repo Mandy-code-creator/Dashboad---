@@ -41,7 +41,7 @@ for t in target_thicks:
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
 if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
+    df = pd.read_excel(uploaded_file)
     df.columns = df.columns.astype(str).str.strip()
 
     # --- 1. DATA PRE-PROCESSING ---
