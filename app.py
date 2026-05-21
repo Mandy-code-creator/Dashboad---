@@ -1171,7 +1171,7 @@ if uploaded_file is not None:
                 
                 # --- GIỮ NGUYÊN ĐOẠN CODE PHÍA DƯỚI (capture_component = ...) ---
 
-                matrix_html_str = "".join(html_parts)
+               
                 capture_component = f"""
                 <!DOCTYPE html>
                 <html>
