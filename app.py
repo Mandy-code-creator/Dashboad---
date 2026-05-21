@@ -45,7 +45,7 @@ if uploaded_file is not None:
     df.columns = df.columns.astype(str).str.strip()
 
     # --- 1. DATA PRE-PROCESSING ---
-    # Handle Dates & Time Grouping First
+    # Handle Dates & Time Grouping First
     date_key = '烤三生產日期' 
     if date_key in df.columns:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
