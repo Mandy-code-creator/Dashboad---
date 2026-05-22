@@ -733,12 +733,6 @@ if uploaded_file is not None:
                     ax_i.axhline(usl, color='darkred', linestyle='-', linewidth=2, label=f'USL (Spec Max): {usl}')
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
-                    
-                    # Mill Range 90% and 110% Markers (Proactive Intervention)
-                    mill_90 = tgt * 0.90
-                    mill_110 = tgt * 1.10
-                    ax_i.axhline(mill_90, color='deepskyblue', linestyle='--', linewidth=1.5, label=f'Mill Range 90%: {mill_90:.1f}')
-                    ax_i.axhline(mill_110, color='deepskyblue', linestyle='--', linewidth=1.5, label=f'Mill Range 110%: {mill_110:.1f}')
                 
                 # Catch out of bounds errors
                 out_condition = (vals > ucl_i) | (vals < lcl_i)
