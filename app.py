@@ -7,7 +7,9 @@ import io
 import seaborn as sns
 import streamlit.components.v1 as components
 from PIL import Image
-
+from docx import Document
+from docx.shared import Inches
+import tempfile
 # --- FIX: Tắt giới hạn pixel để tránh lỗi DecompressionBombError ---
 Image.MAX_IMAGE_PIXELS = None
 
@@ -1271,7 +1273,86 @@ if uploaded_file is not None:
                 </html>
                 """
                 components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
+                # ==========================================
+                # Download Matrix to Word
+                # ==========================================
+                st.markdown("### 📄 Download Production Matrix Report")
                 
+                doc = Document()
+                doc.add_heading('Production vs Usage Quality Matrix', level=1)
+                
+                # Tạo figure tạm
+                fig_tmp, ax_tmp = plt.subplots(figsize=(16, 8))
+                ax_tmp.axis('off')
+                
+                table_data = []
+                
+                # Header
+                header_row = ["Production \\ Usage"] + usage_months + ["Total Output"]
+                table_data.append(header_row)
+                
+                # Data rows
+                for prod in prod_periods:
+                    row_data = [prod]
+                
+                    for usage in usage_months:
+                        row = matrix_dict.get((prod, usage))
+                
+                        if not row:
+                            row_data.append("No Data")
+                        else:
+                            scrap_rate = row['Scrap_Rate']
+                            row_data.append(f"Scrap: {scrap_rate:.1f}%")
+                
+                    p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
+                    p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+                
+                    row_data.append(f"L:{p_len:,.0f}m\nW:{p_wt:,.0f}T")
+                
+                    table_data.append(row_data)
+                
+                # Vẽ table
+                table = ax_tmp.table(
+                    cellText=table_data,
+                    loc='center',
+                    cellLoc='center'
+                )
+                
+                table.auto_set_font_size(False)
+                table.set_fontsize(8)
+                table.scale(1.2, 2)
+                
+                # Save ảnh tạm
+                tmp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                
+                fig_tmp.savefig(
+                    tmp_img.name,
+                    bbox_inches='tight',
+                    dpi=300
+                )
+                
+                plt.close(fig_tmp)
+                
+                # Add image vào Word
+                doc.add_picture(tmp_img.name, width=Inches(7.5))
+                
+                # Export Word
+                word_buffer = io.BytesIO()
+                
+                doc.save(word_buffer)
+                
+                word_buffer.seek(0)
+                
+                # Download button
+                st.download_button(
+                    label="📥 Download Matrix Report (.docx)",
+                    data=word_buffer,
+                    file_name="Production_Matrix_Report.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary",
+                    use_container_width=True,
+                    key="dl_matrix_word"
+                )
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
                 st.markdown("---")
                 
