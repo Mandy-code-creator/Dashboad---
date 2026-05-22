@@ -662,6 +662,7 @@ if uploaded_file is not None:
             st.markdown("---")
 
     # ==========================================================
+    # ==========================================================
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
     # ==========================================================
     with tab4:
@@ -720,7 +721,7 @@ if uploaded_file is not None:
                 ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
                 ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
                 
-                # User Input Specification Limits (USL/LSL/Target)
+                # User Input Specification Limits (USL/LSL/Target) & Mill Range
                 spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {}) if t4_thick != 'Overall' else {}
                 lsl = spec.get('min')
                 usl = spec.get('max')
@@ -732,6 +733,12 @@ if uploaded_file is not None:
                     ax_i.axhline(usl, color='darkred', linestyle='-', linewidth=2, label=f'USL (Spec Max): {usl}')
                 if tgt is not None:
                     ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
+                    
+                    # Mill Range 90% and 110% Markers (Proactive Intervention)
+                    mill_90 = tgt * 0.90
+                    mill_110 = tgt * 1.10
+                    ax_i.axhline(mill_90, color='deepskyblue', linestyle='--', linewidth=1.5, label=f'Mill Range 90%: {mill_90:.1f}')
+                    ax_i.axhline(mill_110, color='deepskyblue', linestyle='--', linewidth=1.5, label=f'Mill Range 110%: {mill_110:.1f}')
                 
                 # Catch out of bounds errors
                 out_condition = (vals > ucl_i) | (vals < lcl_i)
@@ -756,7 +763,8 @@ if uploaded_file is not None:
                 ax_i.set_ylabel("Value")
                 
                 ax_i.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1, fontsize=8)
-                add_chart_border(ax_i)
+                if 'add_chart_border' in globals():
+                    add_chart_border(ax_i)
                 ax_i.set_xticks([]) 
                 
                 # MR-Chart
@@ -772,7 +780,8 @@ if uploaded_file is not None:
                 ax_mr.set_ylabel("Range")
                 
                 ax_mr.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
-                add_chart_border(ax_mr)
+                if 'add_chart_border' in globals():
+                    add_chart_border(ax_mr)
                 
                 step = max(1, len(vals) // 15)
                 ax_mr.set_xticks(range(0, len(vals), step))
@@ -780,7 +789,42 @@ if uploaded_file is not None:
                 
                 fig_imr.tight_layout()
                 st.pyplot(fig_imr)
-                plt.close(fig_imr)  # FIX: Ngăn sập RAM
+                
+                # ==========================================
+                # PPTX EXPORT FEATURE
+                # ==========================================
+                img_stream = io.BytesIO()
+                fig_imr.savefig(img_stream, format='png', bbox_inches='tight', dpi=300)
+                img_stream.seek(0)
+                
+                try:
+                    from pptx import Presentation
+                    from pptx.util import Inches
+                    
+                    prs = Presentation()
+                    blank_slide_layout = prs.slide_layouts[6] # Layout 6 is blank
+                    slide = prs.slides.add_slide(blank_slide_layout)
+                    
+                    # Insert the image into the slide. Dimensions are tailored to fit standard widescreen.
+                    slide.shapes.add_picture(img_stream, Inches(0.5), Inches(0.5), width=Inches(9))
+                    
+                    pptx_stream = io.BytesIO()
+                    prs.save(pptx_stream)
+                    pptx_stream.seek(0)
+                    
+                    st.download_button(
+                        label=f"📥 Download {t4_feat} Chart (.pptx)",
+                        data=pptx_stream,
+                        file_name=f"IMR_Chart_{t4_feat}.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        type="primary",
+                        use_container_width=True,
+                        key=f"dl_ppt_{t4_feat}_{t4_thick}"
+                    )
+                except ImportError:
+                    st.error("Missing dependency. Please run `pip install python-pptx` to enable PowerPoint export.")
+
+                plt.close(fig_imr)  # Ngăn chặn tràn bộ nhớ RAM
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
