@@ -994,15 +994,19 @@ if uploaded_file is not None:
         possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
         COIL_ID_COL = '鋼捲號碼'
+        
+        # Safely identify the weight column
+        possible_wt_cols = ['重量', 'Weight', 'WT', 'Net_Weight', 'Net Weight']
+        WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
             df_t6 = df[df[LEN_COL] > 0].copy() 
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
-            # --- LỌC DỮ LIỆU: Chỉ giữ lại từ Q4/2025 trở đi trên trục Production Period ---
-            old_periods = ["2024 (Full Year)", "2025 (Full Year)", "2025 H1 (Until 06/28)", "2025 Q3 (06/29 - 09/30)"]
-            df_t6 = df_t6[~df_t6['Time_Group'].isin(old_periods)]
+            # Ensure weight is numeric for summary calculations
+            if WT_COL in df_t6.columns:
+                df_t6[WT_COL] = pd.to_numeric(df_t6[WT_COL], errors='coerce').fillna(0)
 
             # Vectorized Date Parsing
             if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
@@ -1013,11 +1017,8 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
             df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
 
-            # Filter Usage Month from Q4/2025 onwards
-            df_t6 = df_t6[df_t6['Usage_Date'] >= pd.Timestamp(2025, 10, 1)].copy()
-
             if df_t6.empty:
-                st.warning("No usage data available for materials produced from Q4/2025 onwards.")
+                st.warning("No usage data available.")
             else:
                 # Machine Transition Classification
                 cutoff_date = pd.to_datetime('2026-04-01')
@@ -1036,10 +1037,10 @@ if uploaded_file is not None:
                 macro_df = df_t6.groupby('Usage_Month').agg(
                     Total_Length=(LEN_COL, 'sum'), 
                     Total_Scrap=(SCRAP_COL, 'sum'),
-                    Avg_YS=('YS', 'mean'),
-                    Avg_TS=('TS', 'mean'),
-                    Avg_EL=('EL', 'mean'),
-                    Avg_YPE=('YPE', 'mean')
+                    Avg_YS=('YS', 'mean') if 'YS' in props_cols else (LEN_COL, 'count'),
+                    Avg_TS=('TS', 'mean') if 'TS' in props_cols else (LEN_COL, 'count'),
+                    Avg_EL=('EL', 'mean') if 'EL' in props_cols else (LEN_COL, 'count'),
+                    Avg_YPE=('YPE', 'mean') if 'YPE' in props_cols else (LEN_COL, 'count')
                 ).reset_index().sort_values('Usage_Month')
                 
                 macro_df['Scrap_Rate (%)'] = np.where(macro_df['Total_Length'] > 0, (macro_df['Total_Scrap'] / macro_df['Total_Length']) * 100, 0).round(2)
@@ -1054,6 +1055,9 @@ if uploaded_file is not None:
                             ('Avg_YPE', 'Actual YPE', '#ff7f0e')]
 
                 for idx, (col_name, label, color) in enumerate(features):
+                    if col_name not in macro_df.columns or (macro_df[col_name] == macro_df['Total_Length']).all():
+                        continue # Skip if missing property
+
                     with cols[idx]:
                         fig_exec, ax1 = plt.subplots(figsize=(6, 4))
                         color1 = '#d62728' 
@@ -1096,24 +1100,44 @@ if uploaded_file is not None:
                             use_container_width=True,
                             key=f"dl_chart_{idx}" 
                         )
-                        plt.close(fig_exec) # Đảm bảo đóng biểu đồ để giải phóng RAM
+                        plt.close(fig_exec) 
 
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
                 st.markdown("---")
                 
+                # ==========================================
                 # Production vs Usage Quality Matrix
+                # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                available_grades = [g for g in base_grades if g in df_t6.columns]
-                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum')}
+                available_grades = [g for g in base_grades if g in df_t6.columns] if 'base_grades' in globals() else []
+                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum') if 'Total_Qty' in df_t6.columns else (LEN_COL, 'count')}
                 matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
-                matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
+                
+                if available_grades:
+                    grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
+
+                # Coil Level Summary Logic (Strict first occurrence deduplication for accurate Length/Weight Output)
+                unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
+                
+                prod_summary = unique_coils_df.groupby('Time_Group').agg({
+                    LEN_COL: 'sum',
+                    WT_COL: 'sum' if WT_COL in df_t6.columns else lambda x: 0
+                }).to_dict('index')
+                
+                usage_summary = unique_coils_df.groupby('Usage_Month').agg({
+                    LEN_COL: 'sum',
+                    WT_COL: 'sum' if WT_COL in df_t6.columns else lambda x: 0
+                }).to_dict('index')
+
+                total_matrix_L = unique_coils_df[LEN_COL].sum()
+                total_matrix_W = unique_coils_df[WT_COL].sum() if WT_COL in df_t6.columns else 0
 
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
@@ -1133,10 +1157,13 @@ if uploaded_file is not None:
                     ".grade-list { list-style-type: none; padding: 0; margin: 0; line-height: 1.4; }",
                     ".grade-list li { display: flex; justify-content: space-between; }",
                     ".grade-name { font-weight: bold; color: #444; }",
+                    ".summary-cell { background-color: #e3f2fd; color: #0d47a1; text-align: center; vertical-align: middle; font-weight: bold; font-size: 11px; }",
+                    ".summary-header { background-color: #1565c0 !important; }",
                     "</style>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
+                html_parts.append("<th class='summary-header'>Total Output<br>(生產總量)</th>")
                 html_parts.append("</tr></thead><tbody>")
 
                 for prod in prod_periods:
@@ -1150,14 +1177,31 @@ if uploaded_file is not None:
                             bg_color = get_color(scrap_rate)
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
-                            if total_coils > 0:
+                            if total_coils > 0 and available_grades:
                                 for g in available_grades:
                                     g_pct = (row.get(g, 0) / total_coils * 100)
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
                             html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
+                    
+                    # Total Output Row Summary
+                    p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
+                    p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+                    html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} T</td>")
                     html_parts.append("</tr>")
+
+                # Bottom Row: Total Usage
+                html_parts.append("<tr><th class='summary-header'>Total Usage<br>(客戶使用量)</th>")
+                for usage in usage_months:
+                    u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
+                    u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
+                    html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} T</td>")
+                
+                # Grand Total
+                html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} T</td>")
+                html_parts.append("</tr>")
+                
                 html_parts.append("</tbody></table>")
 
                 matrix_html_str = "".join(html_parts)
@@ -1226,47 +1270,48 @@ if uploaded_file is not None:
                         use_container_width=True,
                         key="dl_heatmap"
                     )
-                    plt.close(fig_h1) # Đảm bảo đóng biểu đồ
+                    plt.close(fig_h1) 
                 
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
-                    grade_agg_usage = df_t6.groupby('Usage_Month')[available_grades].sum()
-                    grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
-                    grade_pct_usage = grade_pct_usage.fillna(0)
-                    
-                    fig_g2, ax_g2 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6))) 
-                    color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
-                    plot_colors = [color_map.get(g, '#888') for g in available_grades]
-                    
-                    grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
-                    ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
-                    ax_g2.set_xlabel("Usage Month", fontweight='bold')
-                    ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    ax_g2.set_ylim(0, 105)
-                    
-                    for c in ax_g2.containers:
-                        labels = [f"{v.get_height():.0f}%" if v.get_height() > 5 else "" for v in c]
-                        ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
+                    if available_grades:
+                        grade_agg_usage = df_t6.groupby('Usage_Month')[available_grades].sum()
+                        grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
+                        grade_pct_usage = grade_pct_usage.fillna(0)
                         
-                    plt.xticks(rotation=45, ha='right')
-                    if 'add_chart_border' in globals():
-                        add_chart_border(ax_g2)
-                    fig_g2.tight_layout()
-                    st.pyplot(fig_g2)
-                    
-                    buf_g2 = io.BytesIO()
-                    fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
-                    buf_g2.seek(0)
-                    st.download_button(
-                        label="📸 Download Grade Chart",
-                        data=buf_g2,
-                        file_name="Grade_Distribution.png",
-                        mime="image/png",
-                        type="primary",
-                        use_container_width=True,
-                        key="dl_grade"
-                    )
-                    plt.close(fig_g2) # Đảm bảo đóng biểu đồ
+                        fig_g2, ax_g2 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6))) 
+                        color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
+                        plot_colors = [color_map.get(g, '#888') for g in available_grades]
+                        
+                        grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
+                        ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
+                        ax_g2.set_xlabel("Usage Month", fontweight='bold')
+                        ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
+                        ax_g2.set_ylim(0, 105)
+                        
+                        for c in ax_g2.containers:
+                            labels = [f"{v.get_height():.0f}%" if v.get_height() > 5 else "" for v in c]
+                            ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
+                            
+                        plt.xticks(rotation=45, ha='right')
+                        if 'add_chart_border' in globals():
+                            add_chart_border(ax_g2)
+                        fig_g2.tight_layout()
+                        st.pyplot(fig_g2)
+                        
+                        buf_g2 = io.BytesIO()
+                        fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
+                        buf_g2.seek(0)
+                        st.download_button(
+                            label="📸 Download Grade Chart",
+                            data=buf_g2,
+                            file_name="Grade_Distribution.png",
+                            mime="image/png",
+                            type="primary",
+                            use_container_width=True,
+                            key="dl_grade"
+                        )
+                        plt.close(fig_g2)
 
                 st.markdown("---")
                 
