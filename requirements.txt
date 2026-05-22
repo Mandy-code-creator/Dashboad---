@@ -8,3 +8,4 @@ numpy
 fpdf
 xlsxwriter
 python-docx
+python-pptx
