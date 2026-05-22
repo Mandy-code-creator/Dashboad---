@@ -1013,7 +1013,7 @@ if uploaded_file is not None:
             else:
                 df_t6['Usage_Date'] = df_t6[USAGE_COL]
 
-           df_t6 = df_t6.dropna(subset=['Usage_Date'])
+            df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
             # Logic gom nhóm thời gian cho trục Usage cột ngang (Khách hàng sử dụng)
             def format_usage_group(d):
