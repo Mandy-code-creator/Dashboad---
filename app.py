@@ -1274,80 +1274,178 @@ if uploaded_file is not None:
                 """
                 components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
                 # ==========================================
-                # Download Matrix to Word
+                # Download Matrix to Word (Native Word Table)
                 # ==========================================
                 st.markdown("### 📄 Download Production Matrix Report")
                 
-                doc = Document()
-                doc.add_heading('Production vs Usage Quality Matrix', level=1)
+                def create_word_report():
+                    from docx import Document
+                    from docx.shared import Inches, Pt, RGBColor
+                    from docx.oxml.ns import nsdecls
+                    from docx.oxml import parse_xml
+                    from docx.enum.text import WD_ALIGN_PARAGRAPH
+                    from docx.enum.table import WD_ALIGN_VERTICAL
+
+                    doc = Document()
+                    
+                    # Chuyển trang Word sang khổ ngang (Landscape) và thu hẹp lề để chứa đủ bảng
+                    section = doc.sections[0]
+                    new_width, new_height = section.page_height, section.page_width
+                    section.page_width = new_width
+                    section.page_height = new_height
+                    section.left_margin = Inches(0.5)
+                    section.right_margin = Inches(0.5)
+
+                    doc.add_heading('Production vs Usage Quality Matrix', level=1)
+                    
+                    # Hàm hỗ trợ tô màu nền cho ô trong Word
+                    def set_cell_background(cell, hex_color):
+                        hex_color = hex_color.replace("#", "")
+                        shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
+                        cell._tc.get_or_add_tcPr().append(shading_elm)
+
+                    cols_count = len(usage_months) + 2
+                    table = doc.add_table(rows=1, cols=cols_count)
+                    table.style = 'Table Grid'
+                    
+                    # ---------------------------------
+                    # 1. Vẽ Dòng Tiêu Đề (Header Row)
+                    # ---------------------------------
+                    hdr_cells = table.rows[0].cells
+                    hdr_cells[0].text = "Production \\ Usage"
+                    set_cell_background(hdr_cells[0], "1a3a5c")
+                    hdr_cells[0].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+                    hdr_cells[0].paragraphs[0].runs[0].font.bold = True
+                    
+                    for i, m in enumerate(usage_months):
+                        hdr_cells[i+1].text = m
+                        set_cell_background(hdr_cells[i+1], "1a3a5c")
+                        hdr_cells[i+1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+                        hdr_cells[i+1].paragraphs[0].runs[0].font.bold = True
+                        
+                    hdr_cells[-1].text = "Total Output\n(生產總量)"
+                    set_cell_background(hdr_cells[-1], "1565c0")
+                    hdr_cells[-1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+                    hdr_cells[-1].paragraphs[0].runs[0].font.bold = True
+
+                    # Căn giữa cho toàn bộ header
+                    for cell in hdr_cells:
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+                    # ---------------------------------
+                    # 2. Vẽ Dữ Liệu Các Hàng (Data Rows)
+                    # ---------------------------------
+                    for prod in prod_periods:
+                        row_cells = table.add_row().cells
+                        
+                        # Cột đầu tiên: Production Period
+                        row_cells[0].text = prod
+                        set_cell_background(row_cells[0], "f1f3f5")
+                        row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                        row_cells[0].paragraphs[0].runs[0].font.bold = True
+                        
+                        # Các cột Usage Month (Hiển thị Scrap & Grade y hệt giao diện Web)
+                        for i, usage in enumerate(usage_months):
+                            row = matrix_dict.get((prod, usage))
+                            cell = row_cells[i+1]
+                            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                            p = cell.paragraphs[0]
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            
+                            if not row:
+                                run = p.add_run("No Data")
+                                run.font.color.rgb = RGBColor(170, 170, 170)
+                                run.font.size = Pt(8)
+                                set_cell_background(cell, "fafafa")
+                            else:
+                                scrap_rate = row['Scrap_Rate']
+                                bg_color = get_color(scrap_rate)
+                                set_cell_background(cell, bg_color)
+                                
+                                # In dòng Scrap Rate
+                                run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\n")
+                                run_scrap.font.bold = True
+                                run_scrap.font.size = Pt(9)
+                                
+                                # In các chỉ số Grade tỷ lệ %
+                                total_coils = row.get('Total_Coils', 0)
+                                if total_coils > 0 and available_grades:
+                                    for g in available_grades:
+                                        g_pct = (row.get(g, 0) / total_coils * 100)
+                                        if g_pct > 0:
+                                            run_g = p.add_run(f"{g}: ")
+                                            run_g.font.size = Pt(8)
+                                            
+                                            run_pct = p.add_run(f"{g_pct:.0f}%\n")
+                                            run_pct.font.size = Pt(8)
+                                            run_pct.font.bold = True
+                                            # Đổi màu xanh/đỏ cho Grade
+                                            if "A" in g:
+                                                run_pct.font.color.rgb = RGBColor(0, 128, 0) # Xanh lá
+                                            else:
+                                                run_pct.font.color.rgb = RGBColor(220, 20, 60) # Đỏ
+                                                
+                        # Cột cuối cùng: Total Output
+                        p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
+                        p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+                        cell_out = row_cells[-1]
+                        set_cell_background(cell_out, "e3f2fd")
+                        cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                        p_out = cell_out.paragraphs[0]
+                        p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} T")
+                        run_out.font.size = Pt(8)
+                        run_out.font.color.rgb = RGBColor(13, 71, 161) # Xanh dương đậm
+                        run_out.font.bold = True
+
+                    # ---------------------------------
+                    # 3. Vẽ Dòng Cuối Tóm Tắt (Total Usage)
+                    # ---------------------------------
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = "Total Usage\n(客戶使用量)"
+                    set_cell_background(row_cells[0], "1565c0")
+                    row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    row_cells[0].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
+                    row_cells[0].paragraphs[0].runs[0].font.bold = True
+                    
+                    for i, usage in enumerate(usage_months):
+                        u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
+                        u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
+                        cell = row_cells[i+1]
+                        set_cell_background(cell, "e3f2fd")
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                        p = cell.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} T")
+                        run.font.size = Pt(8)
+                        run.font.color.rgb = RGBColor(13, 71, 161)
+                        run.font.bold = True
+                        
+                    # Ô Grand Total góc dưới cùng bên phải
+                    cell_grand = row_cells[-1]
+                    set_cell_background(cell_grand, "bbdefb")
+                    cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    p_grand = cell_grand.paragraphs[0]
+                    p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} T")
+                    run_grand.font.size = Pt(9)
+                    run_grand.font.color.rgb = RGBColor(183, 28, 28) # Đỏ sậm
+                    run_grand.font.bold = True
+
+                    word_buffer = io.BytesIO()
+                    doc.save(word_buffer)
+                    word_buffer.seek(0)
+                    return word_buffer
+                    
+                word_buffer = create_word_report()
                 
-                # Tạo figure tạm
-                fig_tmp, ax_tmp = plt.subplots(figsize=(16, 8))
-                ax_tmp.axis('off')
-                
-                table_data = []
-                
-                # Header
-                header_row = ["Production \\ Usage"] + usage_months + ["Total Output"]
-                table_data.append(header_row)
-                
-                # Data rows
-                for prod in prod_periods:
-                    row_data = [prod]
-                
-                    for usage in usage_months:
-                        row = matrix_dict.get((prod, usage))
-                
-                        if not row:
-                            row_data.append("No Data")
-                        else:
-                            scrap_rate = row['Scrap_Rate']
-                            row_data.append(f"Scrap: {scrap_rate:.1f}%")
-                
-                    p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
-                    p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
-                
-                    row_data.append(f"L:{p_len:,.0f}m\nW:{p_wt:,.0f}T")
-                
-                    table_data.append(row_data)
-                
-                # Vẽ table
-                table = ax_tmp.table(
-                    cellText=table_data,
-                    loc='center',
-                    cellLoc='center'
-                )
-                
-                table.auto_set_font_size(False)
-                table.set_fontsize(8)
-                table.scale(1.2, 2)
-                
-                # Save ảnh tạm
-                tmp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-                
-                fig_tmp.savefig(
-                    tmp_img.name,
-                    bbox_inches='tight',
-                    dpi=300
-                )
-                
-                plt.close(fig_tmp)
-                
-                # Add image vào Word
-                doc.add_picture(tmp_img.name, width=Inches(7.5))
-                
-                # Export Word
-                word_buffer = io.BytesIO()
-                
-                doc.save(word_buffer)
-                
-                word_buffer.seek(0)
-                
-                # Download button
                 st.download_button(
-                    label="📥 Download Matrix Report (.docx)",
+                    label="📥 Download Native Matrix Report (.docx)",
                     data=word_buffer,
-                    file_name="Production_Matrix_Report.docx",
+                    file_name="Production_Matrix_Report_HQ.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary",
                     use_container_width=True,
