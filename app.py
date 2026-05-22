@@ -985,6 +985,7 @@ if uploaded_file is not None:
     # ==========================================================
     # ==========================================================
     # ==========================================================
+    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1004,7 +1005,6 @@ if uploaded_file is not None:
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
-            # Ensure weight is numeric for summary calculations
             if WT_COL in df_t6.columns:
                 df_t6[WT_COL] = pd.to_numeric(df_t6[WT_COL], errors='coerce').fillna(0)
 
@@ -1020,17 +1020,17 @@ if uploaded_file is not None:
             if df_t6.empty:
                 st.warning("No usage data available.")
             else:
-                # Machine Transition Classification
                 cutoff_date = pd.to_datetime('2026-04-01')
                 df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
-                # Process Actual Values for accurate averages (remove zero or sub-zero values)
                 props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
                 if props_cols:
                     df_t6[props_cols] = df_t6[props_cols].apply(pd.to_numeric, errors='coerce')
                     df_t6[props_cols] = df_t6[props_cols].where(df_t6[props_cols] > 0, np.nan)
 
+                # ==========================================
                 # Monthly Scrap & Material Stability Analysis
+                # ==========================================
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
@@ -1056,7 +1056,7 @@ if uploaded_file is not None:
 
                 for idx, (col_name, label, color) in enumerate(features):
                     if col_name not in macro_df.columns or (macro_df[col_name] == macro_df['Total_Length']).all():
-                        continue # Skip if missing property
+                        continue 
 
                     with cols[idx]:
                         fig_exec, ax1 = plt.subplots(figsize=(6, 4))
@@ -1120,8 +1120,23 @@ if uploaded_file is not None:
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
+                
+                # ---------------------------------------------------------
+                # Custom Sort Logic to perfectly match the requested layout
+                # ---------------------------------------------------------
+                def custom_time_sort(period_str):
+                    p = str(period_str)
+                    if "2024 (Full Year)" in p: return "01_2024"
+                    if "2025 H1" in p: return "02_2025_H1"
+                    if "2025 Q3" in p: return "03_2025_Q3"
+                    if p.startswith("2025") and len(p) == 7: return f"04_{p}"   # 2025-10, 2025-11...
+                    if "2025 (Full Year)" in p: return "05_2025_FY"
+                    if p.startswith("2026") and len(p) == 7: return f"06_{p}"   # 2026-01, 2026-02...
+                    if "2026 (Full Year)" in p: return "07_2026_FY"
+                    return f"99_{p}" # Fallback for unexpected formats
+
+                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
-                prod_periods = sorted(matrix_data['Time_Group'].unique(), key=get_sort_key) if 'get_sort_key' in globals() else sorted(matrix_data['Time_Group'].unique())
 
                 # Coil Level Summary Logic (Strict first occurrence deduplication for accurate Length/Weight Output)
                 unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
@@ -1185,20 +1200,17 @@ if uploaded_file is not None:
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
                             html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     
-                    # Total Output Row Summary
                     p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
                     html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} T</td>")
                     html_parts.append("</tr>")
 
-                # Bottom Row: Total Usage
                 html_parts.append("<tr><th class='summary-header'>Total Usage<br>(客戶使用量)</th>")
                 for usage in usage_months:
                     u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
                     u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
                     html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} T</td>")
                 
-                # Grand Total
                 html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} T</td>")
                 html_parts.append("</tr>")
                 
@@ -1244,12 +1256,18 @@ if uploaded_file is not None:
                 st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity | Text = Quality Grade Distribution (%)")
                 st.markdown("---")
                 
+                # ==========================================
                 # Heatmap & Grade Distribution Analysis
+                # ==========================================
                 col_h1, col_h2 = st.columns(2)
 
                 with col_h1:
                     st.subheader("7. Scrap Heatmap")
                     pivot_scrap = matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate')
+                    # Đảm bảo Heatmap cũng áp dụng thứ tự sort mới
+                    ordered_cols = [c for c in prod_periods if c in pivot_scrap.columns]
+                    pivot_scrap = pivot_scrap[ordered_cols]
+                    
                     fig_h1, ax_h1 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6)))
                     sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
                     ax_h1.set_ylabel("Usage Month", fontweight='bold')
@@ -1315,7 +1333,9 @@ if uploaded_file is not None:
 
                 st.markdown("---")
                 
-                # 9 & 10. Split Coil Verification (Strongest Evidence)
+                # ==========================================
+                # 9 & 10. Split Coil Verification 
+                # ==========================================
                 st.subheader("9 & 10. Split Coil Verification")
                 st.info("Identifying identical coils processed on both machines to isolate machine impact.")
 
@@ -1325,7 +1345,6 @@ if uploaded_file is not None:
                 old_machine_col = 'Old Machine (< Apr 2026)'
                 new_machine_col = 'New Machine (>= Apr 2026)'
                 
-                # pivot().dropna() explicitly guarantees we strictly analyze coils used in BOTH time periods
                 split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna(subset=[old_machine_col, new_machine_col])
                 
                 if not split_pivot.empty:
