@@ -1013,8 +1013,23 @@ if uploaded_file is not None:
             else:
                 df_t6['Usage_Date'] = df_t6[USAGE_COL]
 
-            df_t6 = df_t6.dropna(subset=['Usage_Date'])
-            df_t6['Usage_Month'] = df_t6['Usage_Date'].dt.strftime('%Y-%m')
+           df_t6 = df_t6.dropna(subset=['Usage_Date'])
+
+            # Logic gom nhóm thời gian cho trục Usage cột ngang (Khách hàng sử dụng)
+            def format_usage_group(d):
+                if d.year <= 2024:
+                    return "2024 (Full Year)"
+                elif d.year == 2025:
+                    if d <= pd.Timestamp(2025, 6, 28):
+                        return "2025 H1 (Until 06/28)"
+                    elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
+                        return "2025 Q3 (06/29 - 09/30)"
+                    else:
+                        return d.strftime('%Y-%m') # Từ Q4/2025 trở đi (tháng 10, 11, 12)
+                else:
+                    return d.strftime('%Y-%m') # 2026 trở đi vẽ theo tháng
+            
+            df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
 
             if df_t6.empty:
                 st.warning("No usage data available.")
