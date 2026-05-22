@@ -985,7 +985,6 @@ if uploaded_file is not None:
     # ==========================================================
     # ==========================================================
     # ==========================================================
-    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1122,18 +1121,23 @@ if uploaded_file is not None:
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
                 # ---------------------------------------------------------
-                # Custom Sort Logic to perfectly match the requested layout
+                # Dynamic Custom Sort Logic
+                # Groups: 1(Q/H) -> 2(Months) -> 3(Full Year)
                 # ---------------------------------------------------------
                 def custom_time_sort(period_str):
                     p = str(period_str)
-                    if "2024 (Full Year)" in p: return "01_2024"
-                    if "2025 H1" in p: return "02_2025_H1"
-                    if "2025 Q3" in p: return "03_2025_Q3"
-                    if p.startswith("2025") and len(p) == 7: return f"04_{p}"   # 2025-10, 2025-11...
-                    if "2025 (Full Year)" in p: return "05_2025_FY"
-                    if p.startswith("2026") and len(p) == 7: return f"06_{p}"   # 2026-01, 2026-02...
-                    if "2026 (Full Year)" in p: return "07_2026_FY"
-                    return f"99_{p}" # Fallback for unexpected formats
+                    year = p[:4] # Trích xuất năm (VD: 2024, 2025)
+                    
+                    if "Full Year" in p:
+                        group = "3_FullYear"
+                    elif any(q in p for q in ["H1", "H2", "Q1", "Q2", "Q3", "Q4"]):
+                        group = f"1_{p}"
+                    elif len(p) >= 7 and "-" in p[4:8]: # Nhận diện format tháng YYYY-MM
+                        group = f"2_{p}"
+                    else:
+                        group = f"4_{p}" # Fallback
+                        
+                    return f"{year}_{group}"
 
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
