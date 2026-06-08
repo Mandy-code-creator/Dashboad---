@@ -823,6 +823,8 @@ if uploaded_file is not None:
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
+    import io  # Đảm bảo đã import thư viện này ở đầu file
+
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         
@@ -897,6 +899,18 @@ if uploaded_file is not None:
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
+            
+            # --- THÊM NÚT TẢI ẢNH 1 ---
+            buf_trend = io.BytesIO()
+            fig_trend.savefig(buf_trend, format="png", bbox_inches="tight", dpi=300)
+            buf_trend.seek(0)
+            st.download_button(
+                label="📥 Tải biểu đồ Trend về máy (PNG)",
+                data=buf_trend,
+                file_name="rejection_rate_trend.png",
+                mime="image/png",
+                key="dl_trend"
+            )
             plt.close(fig_trend)  # FIX: Ngăn sập RAM
 
             # --- 2. PERIOD SUMMARY & CHART ---
@@ -930,7 +944,20 @@ if uploaded_file is not None:
                 add_chart_border(ax_p)
                 plt.xticks(rotation=30, ha='right')
                 fig_p.tight_layout()
+                
             st.pyplot(fig_p)
+            
+            # --- THÊM NÚT TẢI ẢNH 2 ---
+            buf_p = io.BytesIO()
+            fig_p.savefig(buf_p, format="png", bbox_inches="tight", dpi=300)
+            buf_p.seek(0)
+            st.download_button(
+                label="📥 Tải biểu đồ Scrap Rate (PNG)",
+                data=buf_p,
+                file_name="scrap_rate_by_period.png",
+                mime="image/png",
+                key="dl_period"
+            )
             plt.close(fig_p)  # FIX: Ngăn sập RAM
 
             st.dataframe(
@@ -979,7 +1006,20 @@ if uploaded_file is not None:
                 add_chart_border(ax_t)
                 plt.xticks(rotation=30, ha='right')
                 fig_t.tight_layout()
+                
                 st.pyplot(fig_t)
+                
+                # --- THÊM NÚT TẢI ẢNH 3 ---
+                buf_t = io.BytesIO()
+                fig_t.savefig(buf_t, format="png", bbox_inches="tight", dpi=300)
+                buf_t.seek(0)
+                st.download_button(
+                    label="📥 Tải ảnh Thickness",
+                    data=buf_t,
+                    file_name="scrap_thickness.png",
+                    mime="image/png",
+                    key="dl_thick"
+                )
                 plt.close(fig_t)  # FIX: Ngăn sập RAM
 
             with col_m:
@@ -1007,7 +1047,20 @@ if uploaded_file is not None:
                 add_chart_border(ax_m)
                 plt.xticks(rotation=30, ha='right')
                 fig_m.tight_layout()
+                
                 st.pyplot(fig_m)
+                
+                # --- THÊM NÚT TẢI ẢNH 4 ---
+                buf_m = io.BytesIO()
+                fig_m.savefig(buf_m, format="png", bbox_inches="tight", dpi=300)
+                buf_m.seek(0)
+                st.download_button(
+                    label="📥 Tải ảnh Material",
+                    data=buf_m,
+                    file_name="scrap_material.png",
+                    mime="image/png",
+                    key="dl_mat"
+                )
                 plt.close(fig_m)  # FIX: Ngăn sập RAM
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
