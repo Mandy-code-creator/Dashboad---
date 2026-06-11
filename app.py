@@ -561,7 +561,22 @@ if uploaded_file is not None:
             
         html += "</tbody></table>"
         st.markdown(html, unsafe_allow_html=True)
+        # --- CODE THÊM NÚT TẢI BẢNG DỮ LIỆU ---
+        # Tạo bản sao của bảng dữ liệu đang hiển thị và đặt tên cho cột thời gian
+        export_df = grade_dist_pct_str.copy()
+        export_df.index.name = "Time Period"
 
+        # Chuyển đổi dữ liệu sang định dạng CSV (dùng utf-8-sig để không bị lỗi font chữ)
+        csv_data = export_df.to_csv(index=True).encode('utf-8-sig')
+
+        # Tạo nút Download
+        st.download_button(
+            label="📥 Tải bảng dữ liệu này (CSV)",
+            data=csv_data,
+            file_name="grade_distribution_and_scrap.csv",
+            mime="text/csv",
+            key="dl_grade_scrap"
+        )
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
     # ==========================================================
