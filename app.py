@@ -459,21 +459,31 @@ if uploaded_file is not None:
             st.info("No yield data available to display in this view.")
 
         st.markdown("---")
-        st.subheader("📊 Grade Distribution by Time Period (%)")
+        st.subheader("📊 Grade Distribution & Scrap by Time Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
+        # 1. Tính toán phân bố Grade như cũ
         grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
         grade_dist_display = pd.DataFrame()
         for g in base_grades:
             grade_dist_display[g] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
+            
+        # 2. TÍNH THÊM TỈ LỆ SCRAP TỪ DATAFRAME GỐC THEO TỪNG THÁNG
+        scrap_dist = df.groupby('Time_Group')[['Total_Qty', 'Acceptable_Qty']].sum()
+        grade_dist_display['Scrap_Rate'] = ((scrap_dist['Total_Qty'] - scrap_dist['Acceptable_Qty']) / scrap_dist['Total_Qty'] * 100).fillna(0).round(1)
         
+        # 3. Sắp xếp dữ liệu
         grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
         grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'])
         
-        grade_dist_pct_str = grade_dist_display.map(lambda x: f"{x:.1f}%")
+        # 4. Chuyển đổi định dạng thêm dấu '%'
+        grade_dist_pct_str = grade_dist_display.copy()
+        for col in grade_dist_display.columns:
+            grade_dist_pct_str[col] = grade_dist_display[col].map(lambda x: f"{x:.1f}%")
 
+        # 5. Tạo HTML hiển thị bảng
         header_color = "#1a3a5c"
         alt_row_color = "#dce6f1"
         html = f"""
@@ -486,12 +496,19 @@ if uploaded_file is not None:
         .grade-table tr:hover td {{ background-color:#b8cce4; }}
         </style>
         <table class="grade-table">
-            <thead><tr><th>Time Period</th>{''.join(f'<th>{g}</th>' for g in base_grades)}</tr></thead>
+            <thead>
+                <tr>
+                    <th>Time Period</th>
+                    {''.join(f'<th>{g}</th>' for g in base_grades)}
+                    <th style="background-color:#e67e22;">Scrap Rate</th> </tr>
+            </thead>
             <tbody>
         """
         for period, row in grade_dist_pct_str.iterrows():
             html += "<tr>"
             html += f"<td><b>{period}</b></td>"
+            
+            # Render các cột Grade
             for g in base_grades:
                 val = float(row[g].replace('%', ''))
                 if g in ['B+', 'B'] and val > 1.0:
@@ -500,78 +517,14 @@ if uploaded_file is not None:
                     html += f'<td style="color:#2e7d32;font-weight:bold">{row[g]}</td>'
                 else:
                     html += f'<td>{row[g]}</td>'
+            
+            # Render cột Scrap (In đậm, màu cam cảnh báo)
+            html += f'<td style="color:#d35400; font-weight:bold;">{row["Scrap_Rate"]}</td>'
+            
             html += "</tr>"
         html += "</tbody></table>"
         
         st.markdown(html, unsafe_allow_html=True)
-
-        st.markdown("**📈 Grade Distribution Chart**")
-        fig_g, ax_g = plt.subplots(figsize=(12, 5))
-        if not grade_dist_display.empty:
-            chart_grade_dist = grade_dist_display[grade_dist_display.index != "2025 (Full Year)"]
-            
-            grade_colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350', '#c62828']
-            chart_grade_dist.plot(kind='bar', stacked=True, ax=ax_g, color=grade_colors, edgecolor='white')
-            ax_g.set_ylabel("Percentage (%)")
-            ax_g.set_xlabel("")
-            ax_g.set_ylim(0, 105)
-            ax_g.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
-            add_chart_border(ax_g)
-            
-            for container in ax_g.containers:
-                labels = [f"{v.get_height():.1f}%" if v.get_height() > 3.0 else "" for v in container]
-                ax_g.bar_label(container, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
-            
-            plt.xticks(rotation=30, ha='right')
-            fig_g.tight_layout()
-            st.pyplot(fig_g)
-            plt.close(fig_g)  # FIX: Ngăn sập RAM
-
-        st.markdown("---")
-        st.subheader("Charts by Period & Thickness")
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            st.markdown("**Yield (%) by Period & Thickness**")
-            fig_y, ax_y = plt.subplots(figsize=(8, 4))
-            if not yield_summary.empty:
-                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
-                pivot_y = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Yield (%)', aggfunc='mean')
-                if not pivot_y.empty:
-                    pivot_y.plot(kind='bar', ax=ax_y, color=solid_colors, edgecolor='white')
-                    ax_y.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    for c in ax_y.containers:
-                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                        ax_y.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
-            ax_y.set_ylim(0, 130) 
-            ax_y.set_ylabel("Yield (%)")
-            ax_y.set_xlabel("")
-            add_chart_border(ax_y)
-            plt.xticks(rotation=30, ha='right')
-            fig_y.tight_layout()
-            st.pyplot(fig_y)
-            plt.close(fig_y)  # FIX: Ngăn sập RAM
-            
-        with col_c2:
-            st.markdown("**Defect Rate (%) by Period & Thickness**")
-            fig_d, ax_d = plt.subplots(figsize=(8, 4))
-            if not yield_summary.empty:
-                chart_df = yield_summary[yield_summary['Time_Group'] != "2025 (Full Year)"]
-                pivot_d = chart_df.pivot_table(index='Time_Group', columns='Actual_Thickness', values='Defect_Rate (%)', aggfunc='mean')
-                if not pivot_d.empty:
-                    pivot_d.plot(kind='bar', ax=ax_d, color=solid_colors, edgecolor='white')
-                    ax_d.legend(title="Thickness", bbox_to_anchor=(1.02, 1), loc='upper left')
-                    for c in ax_d.containers:
-                        labels = [f"{v.get_height():.1f}%" if v.get_height() > 0 else "" for v in c]
-                        ax_d.bar_label(c, labels=labels, padding=3, fontsize=7, fontweight='bold', rotation=90)
-                    y_max = pivot_d.max().max() if not pivot_d.isna().all().all() else 10
-                    ax_d.set_ylim(0, y_max * 1.4 + 2)
-            ax_d.set_ylabel("Defect Rate (%)")
-            ax_d.set_xlabel("")
-            add_chart_border(ax_d)
-            plt.xticks(rotation=30, ha='right')
-            fig_d.tight_layout()
-            st.pyplot(fig_d)
-            plt.close(fig_d)  # FIX: Ngăn sập RAM
 
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
