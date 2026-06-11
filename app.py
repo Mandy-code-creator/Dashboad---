@@ -425,9 +425,9 @@ if uploaded_file is not None:
         
         st.subheader("Detailed Yield by Thickness & Material")
         
-        # BƯỚC 1: Thêm 'Scrap_Qty' vào danh sách tính tổng (sum)
+        # BƯỚC 1: Chỉ lấy các cột chắc chắn tồn tại trong dữ liệu
         yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[
-            ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty', 'Scrap_Qty']
+            ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']
         ].sum().reset_index()
         
         yield_summary = yield_summary[yield_summary['Total_Qty'] > 0]
@@ -436,21 +436,21 @@ if uploaded_file is not None:
             yield_summary['Yield (%)'] = (yield_summary['Acceptable_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             yield_summary['Defect_Rate (%)'] = (yield_summary['Severe_Bad_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             
-            # BƯỚC 2: Tính toán Tỉ lệ Scrap (Scrap Rate %)
-            yield_summary['Scrap_Rate (%)'] = (yield_summary['Scrap_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
+            # BƯỚC 2: Tính toán Tỉ lệ Scrap gián tiếp (Scrap = Tổng - Đạt)
+            yield_summary['Scrap_Rate (%)'] = ((yield_summary['Total_Qty'] - yield_summary['Acceptable_Qty']) / yield_summary['Total_Qty'] * 100).round(2)
             
             yield_summary['_sort'] = yield_summary['Time_Group'].apply(get_sort_key)
             yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
 
-            # BƯỚC 3: Cập nhật hiển thị bảng dữ liệu (thêm màu sắc và định dạng cho Scrap_Rate)
+            # BƯỚC 3: Cập nhật hiển thị bảng dữ liệu (đã bỏ Scrap_Qty khỏi phần format)
             st.dataframe(
                 yield_summary.style
                     .background_gradient(subset=['Yield (%)'], cmap='Greens')
                     .background_gradient(subset=['Defect_Rate (%)'], cmap='Reds')
-                    .background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges') # Thêm màu cảnh báo (Cam) cho Scrap
+                    .background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges') 
                     .format({
                         'Actual_Thickness': '{:.2f}', 'Total_Qty': '{:.0f}',
-                        'Acceptable_Qty': '{:.0f}', 'Severe_Bad_Qty': '{:.0f}', 'Scrap_Qty': '{:.0f}',
+                        'Acceptable_Qty': '{:.0f}', 'Severe_Bad_Qty': '{:.0f}',
                         'Yield (%)': '{:.2f}%', 'Defect_Rate (%)': '{:.2f}%', 'Scrap_Rate (%)': '{:.2f}%'
                     }),
                 use_container_width=True, hide_index=True
@@ -458,7 +458,7 @@ if uploaded_file is not None:
         else:
             st.info("No yield data available to display in this view.")
 
-        st.markdown("---")        
+        st.markdown("---")
         st.subheader("📊 Grade Distribution by Time Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
