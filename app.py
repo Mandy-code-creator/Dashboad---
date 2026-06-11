@@ -462,7 +462,7 @@ if uploaded_file is not None:
         st.subheader("📊 Grade Distribution & Scrap by Time Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
-        # 1. Tính toán phân bố Grade như cũ
+        # 1. Tính toán phân bố Grade
         grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
@@ -470,9 +470,44 @@ if uploaded_file is not None:
         for g in base_grades:
             grade_dist_display[g] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
             
-        # 2. TÍNH THÊM TỈ LỆ SCRAP TỪ DATAFRAME GỐC THEO TỪNG THÁNG
-        scrap_dist = df.groupby('Time_Group')[['Total_Qty', 'Acceptable_Qty']].sum()
-        grade_dist_display['Scrap_Rate'] = ((scrap_dist['Total_Qty'] - scrap_dist['Acceptable_Qty']) / scrap_dist['Total_Qty'] * 100).fillna(0).round(1)
+        # 2. TÍNH TỈ LỆ SCRAP THEO ĐÚNG LOGIC TỪ TAB 5
+        COIL_ID_COL = '鋼捲號碼'
+        if LEN_COL in df.columns and SCRAP_COL in df.columns and COIL_ID_COL in df.columns:
+            df_temp = df.copy()
+            df_temp[COIL_ID_COL] = df_temp[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
+            
+            missing_mask = df_temp[COIL_ID_COL].isna()
+            if missing_mask.any():
+                df_temp.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df_temp[missing_mask].index]
+
+            scrap_totals = df_temp.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
+            
+            # Xử lý drop_duplicates an toàn
+            sort_cols = ['Time_Group', 'Production_Date'] if 'Production_Date' in df_temp.columns else ['Time_Group']
+            first_occurrence = df_temp.sort_values(sort_cols).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
+            
+            df_scrap_master_temp = first_occurrence[['Time_Group', COIL_ID_COL, LEN_COL]].merge(
+                scrap_totals, on=[COIL_ID_COL, 'Time_Group']
+            )
+
+            scrap_by_period_temp = df_scrap_master_temp.groupby('Time_Group').agg(
+                Total_Length=(LEN_COL, 'sum'),
+                Total_Scrap=(SCRAP_COL, 'sum')
+            )
+            
+            # Tính tỉ lệ % (Làm tròn 2 chữ số thập phân để ra được 10.41%)
+            scrap_by_period_temp['Scrap_Rate'] = np.where(
+                scrap_by_period_temp['Total_Length'] > 0,
+                (scrap_by_period_temp['Total_Scrap'] / scrap_by_period_temp['Total_Length'] * 100),
+                0
+            ).round(2)
+            
+            # Gắn vào bảng hiển thị chính
+            grade_dist_display = grade_dist_display.join(scrap_by_period_temp['Scrap_Rate'])
+        else:
+            grade_dist_display['Scrap_Rate'] = 0.0
+            
+        grade_dist_display['Scrap_Rate'] = grade_dist_display['Scrap_Rate'].fillna(0)
         
         # 3. Sắp xếp dữ liệu
         grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
@@ -481,7 +516,10 @@ if uploaded_file is not None:
         # 4. Chuyển đổi định dạng thêm dấu '%'
         grade_dist_pct_str = grade_dist_display.copy()
         for col in grade_dist_display.columns:
-            grade_dist_pct_str[col] = grade_dist_display[col].map(lambda x: f"{x:.1f}%")
+            if col == 'Scrap_Rate':
+                grade_dist_pct_str[col] = grade_dist_display[col].map(lambda x: f"{x:.2f}%") 
+            else:
+                grade_dist_pct_str[col] = grade_dist_display[col].map(lambda x: f"{x:.1f}%")
 
         # 5. Tạo HTML hiển thị bảng
         header_color = "#1a3a5c"
@@ -500,7 +538,8 @@ if uploaded_file is not None:
                 <tr>
                     <th>Time Period</th>
                     {''.join(f'<th>{g}</th>' for g in base_grades)}
-                    <th style="background-color:#e67e22;">Scrap Rate</th> </tr>
+                    <th style="background-color:#e67e22;">Scrap Rate</th>
+                </tr>
             </thead>
             <tbody>
         """
@@ -508,7 +547,6 @@ if uploaded_file is not None:
             html += "<tr>"
             html += f"<td><b>{period}</b></td>"
             
-            # Render các cột Grade
             for g in base_grades:
                 val = float(row[g].replace('%', ''))
                 if g in ['B+', 'B'] and val > 1.0:
@@ -518,12 +556,10 @@ if uploaded_file is not None:
                 else:
                     html += f'<td>{row[g]}</td>'
             
-            # Render cột Scrap (In đậm, màu cam cảnh báo)
             html += f'<td style="color:#d35400; font-weight:bold;">{row["Scrap_Rate"]}</td>'
-            
             html += "</tr>"
+            
         html += "</tbody></table>"
-        
         st.markdown(html, unsafe_allow_html=True)
 
     # ==========================================================
