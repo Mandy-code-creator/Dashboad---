@@ -1247,12 +1247,15 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
+                # ==========================================
                 # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                # Calculate Matrix data purely from the deduplicated df_coil
+                available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
+                
+                # Base matrix metrics (Coil-level for counts, lengths, and scrap)
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
@@ -1260,9 +1263,9 @@ if uploaded_file is not None:
                 }
                 matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
-                available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
+                # CRITICAL FIX: Pull grade distribution from original df_t6 to capture the true QC distribution of all processed lots
                 if available_grades:
-                    grade_data = df_coil.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
@@ -1274,7 +1277,6 @@ if uploaded_file is not None:
                 def custom_time_sort(period_str):
                     p = str(period_str)
                     year = p[:4]
-                    
                     if "Full Year" in p:
                         group = "3_FullYear"
                     elif any(q in p for q in ["H1", "H2", "Q1", "Q2", "Q3", "Q4"]):
@@ -1283,13 +1285,11 @@ if uploaded_file is not None:
                         group = f"2_{p}"
                     else:
                         group = f"4_{p}"
-                        
                     return f"{year}_{group}"
 
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Coil Level Summary Logic (Rows/Columns boundary totals)
                 prod_summary = df_coil.groupby('Time_Group').agg({
                     LEN_COL: 'sum',
                     WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
@@ -1342,7 +1342,7 @@ if uploaded_file is not None:
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             
-                            # Calculate the strict sum of grades in this exact cell to serve as 100% denominator
+                            # Calculate the sum of all grades in this cell to get the precise 100% denominator
                             cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
                             
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
@@ -1369,10 +1369,11 @@ if uploaded_file is not None:
                 
                 html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td>")
                 html_parts.append("</tr>")
-                
                 html_parts.append("</tbody></table>")
 
                 matrix_html_str = "".join(html_parts)
+                
+                # Render the capture component
                 capture_component = f"""
                 <!DOCTYPE html>
                 <html>
@@ -1490,7 +1491,7 @@ if uploaded_file is not None:
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # Summing up grades for denominator logic in Word Export
+                                # Accurate grade total denominator calculation for Word
                                 cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
                                 
                                 run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
