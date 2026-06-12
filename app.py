@@ -1141,7 +1141,7 @@ if uploaded_file is not None:
             df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
             # =========================================================================
 
-            # Logic gom nhóm thời gian cho trục Usage cột ngang (Khách hàng sử dụng)
+            # Usage group formatting logic
             def format_usage_group(d):
                 if d.year <= 2024:
                     return "2024 (Full Year)"
@@ -1151,9 +1151,9 @@ if uploaded_file is not None:
                     elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
                         return "2025 Q3 (06/29 - 09/30)"
                     else:
-                        return d.strftime('%Y-%m') # Từ Q4/2025 trở đi
+                        return d.strftime('%Y-%m') # 2025 Q4 and beyond
                 else:
-                    return d.strftime('%Y-%m') # 2026 trở đi
+                    return d.strftime('%Y-%m') # 2026 and beyond
             
             df_coil['Usage_Month'] = df_coil['Usage_Date'].apply(format_usage_group)
 
@@ -1219,6 +1219,7 @@ if uploaded_file is not None:
                                 padding = (feat_max - feat_min) * 0.15 if feat_max > feat_min else feat_min * 0.1
                                 ax2.set_ylim(feat_min - padding, feat_max + padding)
 
+                        # Adjust reference line formatting if necessary
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
                         
@@ -1251,7 +1252,7 @@ if uploaded_file is not None:
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                # Dùng df_coil đã được clean 100% để tính toán toàn bộ Matrix
+                # Calculate Matrix data purely from the deduplicated df_coil
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
@@ -1288,7 +1289,7 @@ if uploaded_file is not None:
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Tổng hợp dòng/cột từ df_coil (Đảm bảo không bao giờ tính trùng)
+                # Coil Level Summary Logic (Rows/Columns boundary totals)
                 prod_summary = df_coil.groupby('Time_Group').agg({
                     LEN_COL: 'sum',
                     WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
@@ -1341,12 +1342,14 @@ if uploaded_file is not None:
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             
-                            # Hiển thị Total Coils ngay trong ô
+                            # Calculate the strict sum of grades in this exact cell to serve as 100% denominator
+                            cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
+                            
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
 
-                            if total_coils > 0 and available_grades:
+                            if cell_total_grade > 0 and available_grades:
                                 for g in available_grades:
-                                    g_pct = (row.get(g, 0) / total_coils * 100)
+                                    g_pct = (row.get(g, 0) / cell_total_grade * 100)
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
@@ -1355,7 +1358,6 @@ if uploaded_file is not None:
                     
                     p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
-                    # Đơn vị trọng lượng là kg
                     html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} kg</td>")
                     html_parts.append("</tr>")
 
@@ -1363,10 +1365,8 @@ if uploaded_file is not None:
                 for usage in usage_months:
                     u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
                     u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
-                    # Đơn vị trọng lượng là kg
                     html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} kg</td>")
                 
-                # Đơn vị trọng lượng góc dưới cùng bên phải là kg
                 html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td>")
                 html_parts.append("</tr>")
                 
@@ -1490,14 +1490,16 @@ if uploaded_file is not None:
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # Bổ sung Coils số lượng vào ô Word
+                                # Summing up grades for denominator logic in Word Export
+                                cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
+                                
                                 run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
                                 run_scrap.font.bold = True
                                 run_scrap.font.size = Pt(9)
                                 
-                                if total_coils > 0 and available_grades:
+                                if cell_total_grade > 0 and available_grades:
                                     for g in available_grades:
-                                        g_pct = (row.get(g, 0) / total_coils * 100)
+                                        g_pct = (row.get(g, 0) / cell_total_grade * 100)
                                         if g_pct > 0:
                                             run_g = p.add_run(f"{g}: ")
                                             run_g.font.size = Pt(8)
@@ -1517,7 +1519,6 @@ if uploaded_file is not None:
                         cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p_out = cell_out.paragraphs[0]
                         p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Đổi đơn vị sang kg trong bảng Word
                         run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} kg")
                         run_out.font.size = Pt(8)
                         run_out.font.color.rgb = RGBColor(13, 71, 161)
@@ -1539,7 +1540,6 @@ if uploaded_file is not None:
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p = cell.paragraphs[0]
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Đổi đơn vị sang kg trong bảng Word
                         run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} kg")
                         run.font.size = Pt(8)
                         run.font.color.rgb = RGBColor(13, 71, 161)
@@ -1550,7 +1550,6 @@ if uploaded_file is not None:
                     cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     p_grand = cell_grand.paragraphs[0]
                     p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    # Đổi đơn vị sang kg trong bảng Word
                     run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} kg")
                     run_grand.font.size = Pt(9)
                     run_grand.font.color.rgb = RGBColor(183, 28, 28)
@@ -1587,6 +1586,7 @@ if uploaded_file is not None:
                     pivot_scrap = pivot_scrap[ordered_cols]
                     
                     fig_h1, ax_h1 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6)))
+                    import seaborn as sns
                     sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
                     ax_h1.set_ylabel("Usage Month", fontweight='bold')
                     ax_h1.set_xlabel("Production Period", fontweight='bold')
@@ -1611,7 +1611,7 @@ if uploaded_file is not None:
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
                     if available_grades:
-                        # Sử dụng df_coil đã làm sạch cho Grade Distribution
+                        # Dùng df_coil đã được làm sạch để vẽ bar chart chuẩn xác
                         grade_agg_usage = df_coil.groupby('Usage_Month')[available_grades].sum()
                         grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
                         grade_pct_usage = grade_pct_usage.fillna(0)
