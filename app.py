@@ -418,7 +418,7 @@ if uploaded_file is not None:
 
     # ==========================================================
     # TASK 2: YIELD SUMMARY
-    # TASK 2: YIELD SUMMARY
+    
     # ==========================================================
     with tab2:
         st.header("2. Executive Quality Yield Summary")
@@ -1119,6 +1119,28 @@ if uploaded_file is not None:
 
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
+            # =========================================================================
+            # CRITICAL LOGIC FIX: COIL-LEVEL HYBRID ASSIGNMENT
+            # 1. Completion Month (Usage_Month): Get the LAST record (keep='last')
+            # 2. Length & Weight: Get from the FIRST record (keep='first')
+            # 3. Scrap Amount: Aggregate sum of all cuts
+            # =========================================================================
+            df_sorted = df_t6.sort_values('Usage_Date')
+            
+            # Base DataFrame: Assign coil to the final completion month
+            df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='last').copy()
+            
+            # Map Length & Weight from the very first appearance to avoid double counting
+            df_first = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first')
+            df_coil[LEN_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[LEN_COL].to_dict())
+            
+            if WT_COL in df_t6.columns:
+                df_coil[WT_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[WT_COL].to_dict())
+                
+            # Aggregate total scrap across all records for that specific coil
+            df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
+            # =========================================================================
+
             # Logic gom nhóm thời gian cho trục Usage cột ngang (Khách hàng sử dụng)
             def format_usage_group(d):
                 if d.year <= 2024:
@@ -1129,22 +1151,22 @@ if uploaded_file is not None:
                     elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
                         return "2025 Q3 (06/29 - 09/30)"
                     else:
-                        return d.strftime('%Y-%m') # Từ Q4/2025 trở đi (tháng 10, 11, 12)
+                        return d.strftime('%Y-%m') # Từ Q4/2025 trở đi
                 else:
-                    return d.strftime('%Y-%m') # 2026 trở đi vẽ theo tháng
+                    return d.strftime('%Y-%m') # 2026 trở đi
             
-            df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
+            df_coil['Usage_Month'] = df_coil['Usage_Date'].apply(format_usage_group)
 
-            if df_t6.empty:
+            if df_coil.empty:
                 st.warning("No usage data available.")
             else:
                 cutoff_date = pd.to_datetime('2026-04-01')
-                df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
+                df_coil['Machine_Status'] = np.where(df_coil['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
-                props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t6.columns]
+                props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_coil.columns]
                 if props_cols:
-                    df_t6[props_cols] = df_t6[props_cols].apply(pd.to_numeric, errors='coerce')
-                    df_t6[props_cols] = df_t6[props_cols].where(df_t6[props_cols] > 0, np.nan)
+                    df_coil[props_cols] = df_coil[props_cols].apply(pd.to_numeric, errors='coerce')
+                    df_coil[props_cols] = df_coil[props_cols].where(df_coil[props_cols] > 0, np.nan)
 
                 # ==========================================
                 # Monthly Scrap & Material Stability Analysis
@@ -1152,7 +1174,7 @@ if uploaded_file is not None:
                 st.subheader("Monthly Scrap & Material Stability Analysis")
                 st.caption("Verifying if the spike in scrap correlates with material instability.")
 
-                macro_df = df_t6.groupby('Usage_Month').agg(
+                macro_df = df_coil.groupby('Usage_Month').agg(
                     Total_Length=(LEN_COL, 'sum'), 
                     Total_Scrap=(SCRAP_COL, 'sum'),
                     Avg_YS=('YS', 'mean') if 'YS' in props_cols else (LEN_COL, 'count'),
@@ -1224,28 +1246,22 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
-                # ==========================================
                 # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                # 1. Tính toán Total Length & Scrap trên toàn bộ dòng (để cộng dồn mét thực tế)
-                # 2. Tính toán Total Coils bằng nunique (đếm số mã cuộn duy nhất trong từng ô tháng)
+                # Dùng df_coil đã được clean 100% để tính toán toàn bộ Matrix
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
-                    'Total_Coils': (COIL_ID_COL, 'nunique') 
+                    'Total_Coils': (COIL_ID_COL, 'count') 
                 }
-                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
-                # Lọc lấy 1 dòng duy nhất cho mỗi cuộn TẠI TỪNG THÁNG SỬ DỤNG để tính Grade
-                # (Tránh việc 1 cuộn cắt 5 lần trong 1 tháng bị cộng dồn thành 5 cuộn cấp độ A-B)
-                cell_unique_df = df_t6.drop_duplicates(subset=['Usage_Month', 'Time_Group', COIL_ID_COL])
-
-                available_grades = [g for g in base_grades if g in df_t6.columns] if 'base_grades' in globals() else []
+                available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
                 if available_grades:
-                    grade_data = cell_unique_df.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = df_coil.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
@@ -1272,24 +1288,19 @@ if uploaded_file is not None:
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Coil Level Summary Logic (Dành cho dòng/cột tổng biên)
-                # Global deduplication chỉ dùng để tính TỔNG TRỌNG LƯỢNG cuối cùng, tránh nhân đôi khối lượng 
-                global_unique_coils = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
+                # Tổng hợp dòng/cột từ df_coil (Đảm bảo không bao giờ tính trùng)
+                prod_summary = df_coil.groupby('Time_Group').agg({
+                    LEN_COL: 'sum',
+                    WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
+                }).to_dict('index')
                 
-                prod_summary = {}
-                for prod in prod_periods:
-                    p_len = df_t6[df_t6['Time_Group'] == prod][LEN_COL].sum()
-                    p_wt = global_unique_coils[global_unique_coils['Time_Group'] == prod][WT_COL].sum() if WT_COL in df_t6.columns else 0
-                    prod_summary[prod] = {LEN_COL: p_len, WT_COL: p_wt}
-                    
-                usage_summary = {}
-                for usage in usage_months:
-                    u_len = df_t6[df_t6['Usage_Month'] == usage][LEN_COL].sum()
-                    u_wt = cell_unique_df[cell_unique_df['Usage_Month'] == usage][WT_COL].sum() if WT_COL in df_t6.columns else 0
-                    usage_summary[usage] = {LEN_COL: u_len, WT_COL: u_wt}
+                usage_summary = df_coil.groupby('Usage_Month').agg({
+                    LEN_COL: 'sum',
+                    WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
+                }).to_dict('index')
 
-                total_matrix_L = df_t6[LEN_COL].sum()
-                total_matrix_W = global_unique_coils[WT_COL].sum() if WT_COL in df_t6.columns else 0
+                total_matrix_L = df_coil[LEN_COL].sum()
+                total_matrix_W = df_coil[WT_COL].sum() if WT_COL in df_coil.columns else 0
 
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
@@ -1330,8 +1341,8 @@ if uploaded_file is not None:
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             
-                            # Cập nhật: Thêm hiển thị Total Coils ngay trong ô
-                            cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Total Coils: {int(total_coils)}</span></div>"
+                            # Hiển thị Total Coils ngay trong ô
+                            cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
 
                             if total_coils > 0 and available_grades:
                                 for g in available_grades:
@@ -1344,7 +1355,7 @@ if uploaded_file is not None:
                     
                     p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
-                    # Cập nhật: Đổi đơn vị trọng lượng từ T sang kg
+                    # Đơn vị trọng lượng là kg
                     html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} kg</td>")
                     html_parts.append("</tr>")
 
@@ -1352,10 +1363,10 @@ if uploaded_file is not None:
                 for usage in usage_months:
                     u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
                     u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
-                    # Cập nhật: Đổi đơn vị trọng lượng từ T sang kg
+                    # Đơn vị trọng lượng là kg
                     html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} kg</td>")
                 
-                # Cập nhật: Đổi đơn vị trọng lượng góc dưới cùng bên phải sang kg
+                # Đơn vị trọng lượng góc dưới cùng bên phải là kg
                 html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td>")
                 html_parts.append("</tr>")
                 
@@ -1479,7 +1490,7 @@ if uploaded_file is not None:
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # Cập nhật: Bổ sung Coils số lượng vào ô Word
+                                # Bổ sung Coils số lượng vào ô Word
                                 run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
                                 run_scrap.font.bold = True
                                 run_scrap.font.size = Pt(9)
@@ -1506,7 +1517,7 @@ if uploaded_file is not None:
                         cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p_out = cell_out.paragraphs[0]
                         p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                        # Đổi đơn vị sang kg trong bảng Word
                         run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} kg")
                         run_out.font.size = Pt(8)
                         run_out.font.color.rgb = RGBColor(13, 71, 161)
@@ -1528,7 +1539,7 @@ if uploaded_file is not None:
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p = cell.paragraphs[0]
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                        # Đổi đơn vị sang kg trong bảng Word
                         run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} kg")
                         run.font.size = Pt(8)
                         run.font.color.rgb = RGBColor(13, 71, 161)
@@ -1539,7 +1550,7 @@ if uploaded_file is not None:
                     cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     p_grand = cell_grand.paragraphs[0]
                     p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                    # Đổi đơn vị sang kg trong bảng Word
                     run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} kg")
                     run_grand.font.size = Pt(9)
                     run_grand.font.color.rgb = RGBColor(183, 28, 28)
@@ -1600,7 +1611,8 @@ if uploaded_file is not None:
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
                     if available_grades:
-                        grade_agg_usage = df_t6.groupby('Usage_Month')[available_grades].sum()
+                        # Sử dụng df_coil đã làm sạch cho Grade Distribution
+                        grade_agg_usage = df_coil.groupby('Usage_Month')[available_grades].sum()
                         grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
                         grade_pct_usage = grade_pct_usage.fillna(0)
                         
