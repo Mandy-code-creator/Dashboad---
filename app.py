@@ -1316,13 +1316,18 @@ if uploaded_file is not None:
                             bg_color = get_color(scrap_rate)
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
+                            
+                            # Thêm thông tin Total Coils vào tiêu đề của từng ô
+                            cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Total Coils: {int(total_coils)}</span></div>"
+
                             if total_coils > 0 and available_grades:
                                 for g in available_grades:
                                     g_pct = (row.get(g, 0) / total_coils * 100)
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
-                            html_parts.append(f"<td style='background-color: {bg_color};'><div class='cell-title'>Scrap: {scrap_rate:.1f}%</div><ul class='grade-list'>{''.join(grade_html)}</ul></td>")
+                            
+                            html_parts.append(f"<td style='background-color: {bg_color};'>{cell_title_html}<ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     
                     p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
@@ -1450,6 +1455,7 @@ if uploaded_file is not None:
                         row_cells[0].paragraphs[0].runs[0].font.bold = True
                         
                         # Các cột Usage Month (Hiển thị Scrap & Grade y hệt giao diện Web)
+                        # Các cột Usage Month (Hiển thị Scrap & Grade y hệt giao diện Web)
                         for i, usage in enumerate(usage_months):
                             row = matrix_dict.get((prod, usage))
                             cell = row_cells[i+1]
@@ -1464,18 +1470,18 @@ if uploaded_file is not None:
                                 set_cell_background(cell, "fafafa")
                             else:
                                 scrap_rate = row['Scrap_Rate']
+                                total_coils = row.get('Total_Coils', 0)
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # In dòng Scrap Rate
-                                run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\n")
+                                # In dòng Scrap Rate VÀ Total Coils (鋼捲數)
+                                run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
                                 run_scrap.font.bold = True
                                 run_scrap.font.size = Pt(9)
                                 
                                 # In các chỉ số Grade tỷ lệ %
-                                total_coils = row.get('Total_Coils', 0)
                                 if total_coils > 0 and available_grades:
-                                    for g in available_grades:
+                                    for g in available_grades::
                                         g_pct = (row.get(g, 0) / total_coils * 100)
                                         if g_pct > 0:
                                             run_g = p.add_run(f"{g}: ")
