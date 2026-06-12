@@ -1230,23 +1230,22 @@ if uploaded_file is not None:
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                # Dời logic deduplication lên đầu để đảm bảo toàn bộ ma trận tính toán trên cấp độ cuộn (Coil-level)
-                unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
-
-                available_grades = [g for g in base_grades if g in unique_coils_df.columns] if 'base_grades' in globals() else []
-                
-                # Cập nhật agg_dict: Dùng 'nunique' đếm chính xác số lượng mã cuộn thay vì đếm số dòng
+                # 1. Tính toán Total Length & Scrap trên toàn bộ dòng (để cộng dồn mét thực tế)
+                # 2. Tính toán Total Coils bằng nunique (đếm số mã cuộn duy nhất trong từng ô tháng)
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
                     'Total_Coils': (COIL_ID_COL, 'nunique') 
                 }
+                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
-                # Dùng unique_coils_df thay vì df_t6 để tính toán dữ liệu từng ô
-                matrix_data = unique_coils_df.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
-                
+                # Lọc lấy 1 dòng duy nhất cho mỗi cuộn TẠI TỪNG THÁNG SỬ DỤNG để tính Grade
+                # (Tránh việc 1 cuộn cắt 5 lần trong 1 tháng bị cộng dồn thành 5 cuộn cấp độ A-B)
+                cell_unique_df = df_t6.drop_duplicates(subset=['Usage_Month', 'Time_Group', COIL_ID_COL])
+
+                available_grades = [g for g in base_grades if g in df_t6.columns] if 'base_grades' in globals() else []
                 if available_grades:
-                    grade_data = unique_coils_df.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = cell_unique_df.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
@@ -1273,19 +1272,24 @@ if uploaded_file is not None:
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Coil Level Summary Logic cho các Cột/Dòng tổng Output và Usage
-                prod_summary = unique_coils_df.groupby('Time_Group').agg({
-                    LEN_COL: 'sum',
-                    WT_COL: 'sum' if WT_COL in df_t6.columns else lambda x: 0
-                }).to_dict('index')
+                # Coil Level Summary Logic (Dành cho dòng/cột tổng biên)
+                # Global deduplication chỉ dùng để tính TỔNG TRỌNG LƯỢNG cuối cùng, tránh nhân đôi khối lượng 
+                global_unique_coils = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
                 
-                usage_summary = unique_coils_df.groupby('Usage_Month').agg({
-                    LEN_COL: 'sum',
-                    WT_COL: 'sum' if WT_COL in df_t6.columns else lambda x: 0
-                }).to_dict('index')
+                prod_summary = {}
+                for prod in prod_periods:
+                    p_len = df_t6[df_t6['Time_Group'] == prod][LEN_COL].sum()
+                    p_wt = global_unique_coils[global_unique_coils['Time_Group'] == prod][WT_COL].sum() if WT_COL in df_t6.columns else 0
+                    prod_summary[prod] = {LEN_COL: p_len, WT_COL: p_wt}
+                    
+                usage_summary = {}
+                for usage in usage_months:
+                    u_len = df_t6[df_t6['Usage_Month'] == usage][LEN_COL].sum()
+                    u_wt = cell_unique_df[cell_unique_df['Usage_Month'] == usage][WT_COL].sum() if WT_COL in df_t6.columns else 0
+                    usage_summary[usage] = {LEN_COL: u_len, WT_COL: u_wt}
 
-                total_matrix_L = unique_coils_df[LEN_COL].sum()
-                total_matrix_W = unique_coils_df[WT_COL].sum() if WT_COL in df_t6.columns else 0
+                total_matrix_L = df_t6[LEN_COL].sum()
+                total_matrix_W = global_unique_coils[WT_COL].sum() if WT_COL in df_t6.columns else 0
 
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
