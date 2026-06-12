@@ -1120,10 +1120,28 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
             # =========================================================================
-            # CRITICAL LOGIC FIX: COIL-LEVEL HYBRID ASSIGNMENT
-            # 1. Completion Month (Usage_Month): Get the LAST record (keep='last')
-            # 2. Length & Weight: Get from the FIRST record (keep='first')
-            # 3. Scrap Amount: Aggregate sum of all cuts
+            # 1. APPLY USAGE MONTH TO ORIGINAL DATAFRAME FIRST (FIX FOR KEYERROR)
+            # =========================================================================
+            def format_usage_group(d):
+                if d.year <= 2024:
+                    return "2024 (Full Year)"
+                elif d.year == 2025:
+                    if d <= pd.Timestamp(2025, 6, 28):
+                        return "2025 H1 (Until 06/28)"
+                    elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
+                        return "2025 Q3 (06/29 - 09/30)"
+                    else:
+                        return d.strftime('%Y-%m') # 2025 Q4 and beyond
+                else:
+                    return d.strftime('%Y-%m') # 2026 and beyond
+            
+            df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
+
+            # =========================================================================
+            # 2. CRITICAL LOGIC FIX: COIL-LEVEL HYBRID ASSIGNMENT
+            # - Completion Month (Usage_Month): Get the LAST record (keep='last')
+            # - Length & Weight: Get from the FIRST record (keep='first')
+            # - Scrap Amount: Aggregate sum of all cuts
             # =========================================================================
             df_sorted = df_t6.sort_values('Usage_Date')
             
@@ -1141,22 +1159,6 @@ if uploaded_file is not None:
             df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
             # =========================================================================
 
-            # Usage group formatting logic
-            def format_usage_group(d):
-                if d.year <= 2024:
-                    return "2024 (Full Year)"
-                elif d.year == 2025:
-                    if d <= pd.Timestamp(2025, 6, 28):
-                        return "2025 H1 (Until 06/28)"
-                    elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
-                        return "2025 Q3 (06/29 - 09/30)"
-                    else:
-                        return d.strftime('%Y-%m') # 2025 Q4 and beyond
-                else:
-                    return d.strftime('%Y-%m') # 2026 and beyond
-            
-            df_coil['Usage_Month'] = df_coil['Usage_Date'].apply(format_usage_group)
-
             if df_coil.empty:
                 st.warning("No usage data available.")
             else:
@@ -1164,6 +1166,7 @@ if uploaded_file is not None:
                 df_coil['Machine_Status'] = np.where(df_coil['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
                 props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_coil.columns]
+                # ... (Phần code bên dưới giữ nguyên không thay đổi) ...
                 if props_cols:
                     df_coil[props_cols] = df_coil[props_cols].apply(pd.to_numeric, errors='coerce')
                     df_coil[props_cols] = df_coil[props_cols].where(df_coil[props_cols] > 0, np.nan)
