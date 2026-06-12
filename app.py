@@ -1224,17 +1224,29 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
+                # ==========================================
                 # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
 
-                available_grades = [g for g in base_grades if g in df_t6.columns] if 'base_grades' in globals() else []
-                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': ('Total_Qty', 'sum') if 'Total_Qty' in df_t6.columns else (LEN_COL, 'count')}
-                matrix_data = df_t6.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                # Dời logic deduplication lên đầu để đảm bảo toàn bộ ma trận tính toán trên cấp độ cuộn (Coil-level)
+                unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
+
+                available_grades = [g for g in base_grades if g in unique_coils_df.columns] if 'base_grades' in globals() else []
+                
+                # Cập nhật agg_dict: Dùng 'nunique' đếm chính xác số lượng mã cuộn thay vì đếm số dòng
+                agg_dict = {
+                    'Total_Length': (LEN_COL, 'sum'), 
+                    'Total_Scrap': (SCRAP_COL, 'sum'), 
+                    'Total_Coils': (COIL_ID_COL, 'nunique') 
+                }
+                
+                # Dùng unique_coils_df thay vì df_t6 để tính toán dữ liệu từng ô
+                matrix_data = unique_coils_df.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
                 if available_grades:
-                    grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = unique_coils_df.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
@@ -1261,9 +1273,7 @@ if uploaded_file is not None:
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Coil Level Summary Logic (Strict deduplication)
-                unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
-                
+                # Coil Level Summary Logic cho các Cột/Dòng tổng Output và Usage
                 prod_summary = unique_coils_df.groupby('Time_Group').agg({
                     LEN_COL: 'sum',
                     WT_COL: 'sum' if WT_COL in df_t6.columns else lambda x: 0
