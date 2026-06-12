@@ -1089,7 +1089,6 @@ if uploaded_file is not None:
             
     # ==========================================================
     # ==========================================================
-    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1246,23 +1245,23 @@ if uploaded_file is not None:
                 # ---------------------------------------------------------
                 def custom_time_sort(period_str):
                     p = str(period_str)
-                    year = p[:4] # Trích xuất năm (VD: 2024, 2025)
+                    year = p[:4]
                     
                     if "Full Year" in p:
                         group = "3_FullYear"
                     elif any(q in p for q in ["H1", "H2", "Q1", "Q2", "Q3", "Q4"]):
                         group = f"1_{p}"
-                    elif len(p) >= 7 and "-" in p[4:8]: # Nhận diện format tháng YYYY-MM
+                    elif len(p) >= 7 and "-" in p[4:8]:
                         group = f"2_{p}"
                     else:
-                        group = f"4_{p}" # Fallback
+                        group = f"4_{p}"
                         
                     return f"{year}_{group}"
 
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Coil Level Summary Logic (Strict first occurrence deduplication for accurate Length/Weight Output)
+                # Coil Level Summary Logic (Strict deduplication)
                 unique_coils_df = df_t6.sort_values('Usage_Date').drop_duplicates(subset=[COIL_ID_COL], keep='first')
                 
                 prod_summary = unique_coils_df.groupby('Time_Group').agg({
@@ -1317,7 +1316,7 @@ if uploaded_file is not None:
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             
-                            # Thêm thông tin Total Coils vào tiêu đề của từng ô
+                            # Cập nhật: Thêm hiển thị Total Coils ngay trong ô
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Total Coils: {int(total_coils)}</span></div>"
 
                             if total_coils > 0 and available_grades:
@@ -1331,16 +1330,19 @@ if uploaded_file is not None:
                     
                     p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
-                    html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} T</td>")
+                    # Cập nhật: Đổi đơn vị trọng lượng từ T sang kg
+                    html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} kg</td>")
                     html_parts.append("</tr>")
 
                 html_parts.append("<tr><th class='summary-header'>Total Usage<br>(客戶使用量)</th>")
                 for usage in usage_months:
                     u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
                     u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
-                    html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} T</td>")
+                    # Cập nhật: Đổi đơn vị trọng lượng từ T sang kg
+                    html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} kg</td>")
                 
-                html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} T</td>")
+                # Cập nhật: Đổi đơn vị trọng lượng góc dưới cùng bên phải sang kg
+                html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td>")
                 html_parts.append("</tr>")
                 
                 html_parts.append("</tbody></table>")
@@ -1381,6 +1383,7 @@ if uploaded_file is not None:
                 </html>
                 """
                 components.html(capture_component, height=max(250, len(prod_periods)*65 + 100), scrolling=True)
+                
                 # ==========================================
                 # Download Matrix to Word (Native Word Table)
                 # ==========================================
@@ -1396,7 +1399,6 @@ if uploaded_file is not None:
 
                     doc = Document()
                     
-                    # Chuyển trang Word sang khổ ngang (Landscape) và thu hẹp lề để chứa đủ bảng
                     section = doc.sections[0]
                     new_width, new_height = section.page_height, section.page_width
                     section.page_width = new_width
@@ -1406,7 +1408,6 @@ if uploaded_file is not None:
 
                     doc.add_heading('Production vs Usage Quality Matrix', level=1)
                     
-                    # Hàm hỗ trợ tô màu nền cho ô trong Word
                     def set_cell_background(cell, hex_color):
                         hex_color = hex_color.replace("#", "")
                         shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
@@ -1416,9 +1417,6 @@ if uploaded_file is not None:
                     table = doc.add_table(rows=1, cols=cols_count)
                     table.style = 'Table Grid'
                     
-                    # ---------------------------------
-                    # 1. Vẽ Dòng Tiêu Đề (Header Row)
-                    # ---------------------------------
                     hdr_cells = table.rows[0].cells
                     hdr_cells[0].text = "Production \\ Usage"
                     set_cell_background(hdr_cells[0], "1a3a5c")
@@ -1436,26 +1434,19 @@ if uploaded_file is not None:
                     hdr_cells[-1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
                     hdr_cells[-1].paragraphs[0].runs[0].font.bold = True
 
-                    # Căn giữa cho toàn bộ header
                     for cell in hdr_cells:
                         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-                    # ---------------------------------
-                    # 2. Vẽ Dữ Liệu Các Hàng (Data Rows)
-                    # ---------------------------------
                     for prod in prod_periods:
                         row_cells = table.add_row().cells
                         
-                        # Cột đầu tiên: Production Period
                         row_cells[0].text = prod
                         set_cell_background(row_cells[0], "f1f3f5")
                         row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         row_cells[0].paragraphs[0].runs[0].font.bold = True
                         
-                        # Các cột Usage Month (Hiển thị Scrap & Grade y hệt giao diện Web)
-                        # Các cột Usage Month (Hiển thị Scrap & Grade y hệt giao diện Web)
                         for i, usage in enumerate(usage_months):
                             row = matrix_dict.get((prod, usage))
                             cell = row_cells[i+1]
@@ -1474,14 +1465,13 @@ if uploaded_file is not None:
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # In dòng Scrap Rate VÀ Total Coils (鋼捲數)
+                                # Cập nhật: Bổ sung Coils số lượng vào ô Word
                                 run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
                                 run_scrap.font.bold = True
                                 run_scrap.font.size = Pt(9)
                                 
-                                # In các chỉ số Grade tỷ lệ %
                                 if total_coils > 0 and available_grades:
-                                    for g in available_grades::
+                                    for g in available_grades:
                                         g_pct = (row.get(g, 0) / total_coils * 100)
                                         if g_pct > 0:
                                             run_g = p.add_run(f"{g}: ")
@@ -1490,13 +1480,11 @@ if uploaded_file is not None:
                                             run_pct = p.add_run(f"{g_pct:.0f}%\n")
                                             run_pct.font.size = Pt(8)
                                             run_pct.font.bold = True
-                                            # Đổi màu xanh/đỏ cho Grade
                                             if "A" in g:
-                                                run_pct.font.color.rgb = RGBColor(0, 128, 0) # Xanh lá
+                                                run_pct.font.color.rgb = RGBColor(0, 128, 0)
                                             else:
-                                                run_pct.font.color.rgb = RGBColor(220, 20, 60) # Đỏ
+                                                run_pct.font.color.rgb = RGBColor(220, 20, 60)
                                                 
-                        # Cột cuối cùng: Total Output
                         p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                         p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
                         cell_out = row_cells[-1]
@@ -1504,14 +1492,12 @@ if uploaded_file is not None:
                         cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p_out = cell_out.paragraphs[0]
                         p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} T")
+                        # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                        run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} kg")
                         run_out.font.size = Pt(8)
-                        run_out.font.color.rgb = RGBColor(13, 71, 161) # Xanh dương đậm
+                        run_out.font.color.rgb = RGBColor(13, 71, 161)
                         run_out.font.bold = True
 
-                    # ---------------------------------
-                    # 3. Vẽ Dòng Cuối Tóm Tắt (Total Usage)
-                    # ---------------------------------
                     row_cells = table.add_row().cells
                     row_cells[0].text = "Total Usage\n(客戶使用量)"
                     set_cell_background(row_cells[0], "1565c0")
@@ -1528,20 +1514,21 @@ if uploaded_file is not None:
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p = cell.paragraphs[0]
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} T")
+                        # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                        run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} kg")
                         run.font.size = Pt(8)
                         run.font.color.rgb = RGBColor(13, 71, 161)
                         run.font.bold = True
                         
-                    # Ô Grand Total góc dưới cùng bên phải
                     cell_grand = row_cells[-1]
                     set_cell_background(cell_grand, "bbdefb")
                     cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     p_grand = cell_grand.paragraphs[0]
                     p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} T")
+                    # Cập nhật: Đổi đơn vị sang kg trong bảng Word
+                    run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} kg")
                     run_grand.font.size = Pt(9)
-                    run_grand.font.color.rgb = RGBColor(183, 28, 28) # Đỏ sậm
+                    run_grand.font.color.rgb = RGBColor(183, 28, 28)
                     run_grand.font.bold = True
 
                     word_buffer = io.BytesIO()
@@ -1571,7 +1558,6 @@ if uploaded_file is not None:
                 with col_h1:
                     st.subheader("7. Scrap Heatmap")
                     pivot_scrap = matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate')
-                    # Đảm bảo Heatmap cũng áp dụng thứ tự sort mới
                     ordered_cols = [c for c in prod_periods if c in pivot_scrap.columns]
                     pivot_scrap = pivot_scrap[ordered_cols]
                     
