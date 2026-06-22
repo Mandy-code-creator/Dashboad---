@@ -1089,6 +1089,7 @@ if uploaded_file is not None:
             
     # ==========================================================
     # ==========================================================
+    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1120,7 +1121,7 @@ if uploaded_file is not None:
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
             # =========================================================================
-            # 1. APPLY USAGE MONTH TO ORIGINAL DATAFRAME FIRST (FIX FOR KEYERROR)
+            # 1. APPLY USAGE MONTH TO ORIGINAL DATAFRAME FIRST
             # =========================================================================
             def format_usage_group(d):
                 if d.year <= 2024:
@@ -1139,9 +1140,6 @@ if uploaded_file is not None:
 
             # =========================================================================
             # 2. CRITICAL LOGIC FIX: COIL-LEVEL HYBRID ASSIGNMENT
-            # - Completion Month (Usage_Month): Get the LAST record (keep='last')
-            # - Length & Weight: Get from the FIRST record (keep='first')
-            # - Scrap Amount: Aggregate sum of all cuts
             # =========================================================================
             df_sorted = df_t6.sort_values('Usage_Date')
             
@@ -1159,6 +1157,30 @@ if uploaded_file is not None:
             df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
             # =========================================================================
 
+            # =========================================================================
+            # 🔍 METHOD 3: TRACER BULLET LOGIC (DEBUGGING)
+            # =========================================================================
+            st.markdown("---")
+            st.markdown("### 🔍 Debug: Tracer Bullet (Track a Specific Coil)")
+            test_coil = st.text_input("Enter the missing Coil ID to track its exact calculation path:")
+            if test_coil:
+                test_coil = test_coil.strip()
+                raw_history = df_sorted[df_sorted[COIL_ID_COL] == test_coil]
+                
+                if raw_history.empty:
+                    st.error(f"❌ Coil ID '{test_coil}' not found in the valid usage data (Length might be 0 or Usage Date is missing).")
+                else:
+                    st.write(f"**Raw Usage History for Coil {test_coil}:**")
+                    st.dataframe(raw_history[['Usage_Date', 'Usage_Month', LEN_COL, SCRAP_COL]], use_container_width=True)
+                    
+                    final_month = df_coil[df_coil[COIL_ID_COL] == test_coil]['Usage_Month'].values
+                    if len(final_month) > 0:
+                        st.success(f"👉 Conclusion: The app assigned this coil to month: **{final_month[0]}** (Due to keep='last' logic).")
+                    else:
+                        st.error("❌ This coil was completely dropped during data aggregation.")
+            st.markdown("---")
+            # =========================================================================
+
             if df_coil.empty:
                 st.warning("No usage data available.")
             else:
@@ -1166,7 +1188,6 @@ if uploaded_file is not None:
                 df_coil['Machine_Status'] = np.where(df_coil['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
                 props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_coil.columns]
-                # ... (Phần code bên dưới giữ nguyên không thay đổi) ...
                 if props_cols:
                     df_coil[props_cols] = df_coil[props_cols].apply(pd.to_numeric, errors='coerce')
                     df_coil[props_cols] = df_coil[props_cols].where(df_coil[props_cols] > 0, np.nan)
@@ -1222,7 +1243,6 @@ if uploaded_file is not None:
                                 padding = (feat_max - feat_min) * 0.15 if feat_max > feat_min else feat_min * 0.1
                                 ax2.set_ylim(feat_min - padding, feat_max + padding)
 
-                        # Adjust reference line formatting if necessary
                         plt.title(f"Scrap vs {label}", fontweight='bold', fontsize=10)
                         ax1.set_xticklabels(macro_df['Usage_Month'], rotation=45, ha='right', fontsize=8)
                         
@@ -1250,7 +1270,6 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
-                # ==========================================
                 # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
@@ -1258,7 +1277,6 @@ if uploaded_file is not None:
 
                 available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
                 
-                # Base matrix metrics (Coil-level for counts, lengths, and scrap)
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
@@ -1266,17 +1284,12 @@ if uploaded_file is not None:
                 }
                 matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
-                # CRITICAL FIX: Pull grade distribution from original df_t6 to capture the true QC distribution of all processed lots
                 if available_grades:
                     grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # ---------------------------------------------------------
-                # Dynamic Custom Sort Logic
-                # Groups: 1(Q/H) -> 2(Months) -> 3(Full Year)
-                # ---------------------------------------------------------
                 def custom_time_sort(period_str):
                     p = str(period_str)
                     year = p[:4]
@@ -1345,7 +1358,6 @@ if uploaded_file is not None:
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
                             
-                            # Calculate the sum of all grades in this cell to get the precise 100% denominator
                             cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
                             
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
@@ -1376,7 +1388,6 @@ if uploaded_file is not None:
 
                 matrix_html_str = "".join(html_parts)
                 
-                # Render the capture component
                 capture_component = f"""
                 <!DOCTYPE html>
                 <html>
@@ -1494,7 +1505,6 @@ if uploaded_file is not None:
                                 bg_color = get_color(scrap_rate)
                                 set_cell_background(cell, bg_color)
                                 
-                                # Accurate grade total denominator calculation for Word
                                 cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
                                 
                                 run_scrap = p.add_run(f"Scrap: {scrap_rate:.1f}%\nCoils: {int(total_coils)}\n")
@@ -1615,7 +1625,6 @@ if uploaded_file is not None:
                 with col_h2:
                     st.subheader("8. Grade Distribution Analysis")
                     if available_grades:
-                        # Dùng df_coil đã được làm sạch để vẽ bar chart chuẩn xác
                         grade_agg_usage = df_coil.groupby('Usage_Month')[available_grades].sum()
                         grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
                         grade_pct_usage = grade_pct_usage.fillna(0)
