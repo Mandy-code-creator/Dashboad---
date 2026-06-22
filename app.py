@@ -1090,7 +1090,6 @@ if uploaded_file is not None:
     # ==========================================================
     # ==========================================================
     # ==========================================================
-    ## ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1101,19 +1100,20 @@ if uploaded_file is not None:
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
         COIL_ID_COL = '鋼捲號碼'
         
-        # Safely identify the weight column
         possible_wt_cols = ['重量', 'Weight', 'WT', 'Net_Weight', 'Net Weight']
         WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            df_t6 = df[df[LEN_COL] > 0].copy() 
+            # --- FIX: Bỏ dòng ảo 2025 (Full Year) khỏi dữ liệu gốc để xử lý gộp cuộn chuẩn xác ---
+            df_t6_raw = df[df['Time_Group'] != "2025 (Full Year)"].copy()
+            df_t6 = df_t6_raw[df_t6_raw[LEN_COL] > 0].copy() 
+            
             df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
             df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
 
             if WT_COL in df_t6.columns:
                 df_t6[WT_COL] = pd.to_numeric(df_t6[WT_COL], errors='coerce').fillna(0)
 
-            # Vectorized Date Parsing
             if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
                 df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
             else:
@@ -1121,9 +1121,6 @@ if uploaded_file is not None:
 
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
-            # =========================================================================
-            # 1. APPLY USAGE MONTH TO ORIGINAL DATAFRAME FIRST
-            # =========================================================================
             def format_usage_group(d):
                 if d.year <= 2024:
                     return "2024 (Full Year)"
@@ -1133,32 +1130,25 @@ if uploaded_file is not None:
                     elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
                         return "2025 Q3 (06/29 - 09/30)"
                     else:
-                        return d.strftime('%Y-%m') # 2025 Q4 and beyond
+                        return d.strftime('%Y-%m')
                 else:
-                    return d.strftime('%Y-%m') # 2026 and beyond
+                    return d.strftime('%Y-%m') 
             
             df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
 
-            # =========================================================================
-            # 2. CRITICAL LOGIC FIX: COIL-LEVEL HYBRID ASSIGNMENT
-            # =========================================================================
             df_sorted = df_t6.sort_values('Usage_Date')
             
-            # Base DataFrame: Assign coil to the final completion month
-            df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='last').copy()
+            # --- FIX: Giữ lại cuộn ở tháng ĐẦU TIÊN mang ra cắt để khớp Excel ---
+            df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
             
-            # Map Length & Weight from the very first appearance to avoid double counting
             df_first = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first')
             df_coil[LEN_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[LEN_COL].to_dict())
             
             if WT_COL in df_t6.columns:
                 df_coil[WT_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[WT_COL].to_dict())
                 
-            # Aggregate total scrap across all records for that specific coil
             df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
-            # =========================================================================
 
-            # =========================================================================
             # =========================================================================
             # 🔍 METHOD 3: MISSING COILS FINDER & TRACER BULLET (DEBUGGING)
             # =========================================================================
@@ -1201,11 +1191,10 @@ if uploaded_file is not None:
                         
                         final_month = df_coil[df_coil[COIL_ID_COL] == test_coil]['Usage_Month'].values
                         if len(final_month) > 0:
-                            st.success(f"👉 Assigned to final month: **{final_month[0]}** (keep='last' logic).")
+                            st.success(f"👉 Assigned to final month: **{final_month[0]}** (keep='first' logic).")
                         else:
                             st.error("❌ Dropped entirely during aggregation.")
             st.markdown("---")
-            # =========================================================================
             # =========================================================================
 
             if df_coil.empty:
@@ -1213,8 +1202,6 @@ if uploaded_file is not None:
             else:
                 cutoff_date = pd.to_datetime('2026-04-01')
                 
-                # --- [FIX LỖI KEYERROR TẠI ĐÂY] ---
-                # Phải gán Machine_Status cho cả df_t6 (data thô) để tí nữa hàm groupby Split Coil chạy được
                 df_coil['Machine_Status'] = np.where(df_coil['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
                 df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
@@ -1308,15 +1295,30 @@ if uploaded_file is not None:
 
                 available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
                 
+                # --- LOGIC TẠO RIÊNG SUMMARY "2025 (FULL YEAR)" CHO MATRIX ---
+                df_matrix_coil = df_coil.copy()
+                df_25_coils = df_matrix_coil[df_matrix_coil['Time_Group'].str.contains('2025')].copy()
+                if not df_25_coils.empty:
+                    df_25_coils['Time_Group'] = '2025 (Full Year)'
+                    df_matrix_coil = pd.concat([df_matrix_coil, df_25_coils], ignore_index=True)
+
+                df_matrix_t6 = df_t6.copy()
+                df_25_t6 = df_matrix_t6[df_matrix_t6['Time_Group'].str.contains('2025')].copy()
+                if not df_25_t6.empty:
+                    df_25_t6['Time_Group'] = '2025 (Full Year)'
+                    df_matrix_t6 = pd.concat([df_matrix_t6, df_25_t6], ignore_index=True)
+
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
                     'Total_Coils': (COIL_ID_COL, 'count') 
                 }
-                matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                
+                # Tính toán thân Matrix dựa trên df_matrix_coil (có chứa 2025 Full Year)
+                matrix_data = df_matrix_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
                 if available_grades:
-                    grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = df_matrix_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
@@ -1337,11 +1339,13 @@ if uploaded_file is not None:
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                prod_summary = df_coil.groupby('Time_Group').agg({
+                # Cột Total Output (Bên phải cùng): Vẫn dùng df_matrix_coil để hiện dòng tổng 2025
+                prod_summary = df_matrix_coil.groupby('Time_Group').agg({
                     LEN_COL: 'sum',
-                    WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
+                    WT_COL: 'sum' if WT_COL in df_matrix_coil.columns else lambda x: 0
                 }).to_dict('index')
                 
+                # Cột Total Usage (Dưới cùng) & Grand Total: Phải dùng df_coil (KHÔNG chứa summary) để tránh X2 dữ liệu
                 usage_summary = df_coil.groupby('Usage_Month').agg({
                     LEN_COL: 'sum',
                     WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
@@ -1625,7 +1629,6 @@ if uploaded_file is not None:
                 st.subheader("Split Coil Verification")
                 st.info("Identifying identical coils processed on both machines to isolate machine impact.")
 
-                # Đã fix lỗi df_t6['Machine_Status'] bên trên nên giờ hàm groupby này sẽ chạy mượt mà
                 coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
                 coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
                 
