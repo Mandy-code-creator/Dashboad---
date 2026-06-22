@@ -1090,6 +1090,7 @@ if uploaded_file is not None:
     # ==========================================================
     # ==========================================================
     # ==========================================================
+    ## ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
@@ -1185,7 +1186,11 @@ if uploaded_file is not None:
                 st.warning("No usage data available.")
             else:
                 cutoff_date = pd.to_datetime('2026-04-01')
+                
+                # --- [FIX LỖI KEYERROR TẠI ĐÂY] ---
+                # Phải gán Machine_Status cho cả df_t6 (data thô) để tí nữa hàm groupby Split Coil chạy được
                 df_coil['Machine_Status'] = np.where(df_coil['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
+                df_t6['Machine_Status'] = np.where(df_t6['Usage_Date'] >= cutoff_date, 'New Machine (>= Apr 2026)', 'Old Machine (< Apr 2026)')
 
                 props_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_coil.columns]
                 if props_cols:
@@ -1589,88 +1594,12 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
-                # Heatmap & Grade Distribution Analysis
+                # Split Coil Verification 
                 # ==========================================
-                col_h1, col_h2 = st.columns(2)
-
-                with col_h1:
-                    st.subheader("7. Scrap Heatmap")
-                    pivot_scrap = matrix_data.pivot(index='Usage_Month', columns='Time_Group', values='Scrap_Rate')
-                    ordered_cols = [c for c in prod_periods if c in pivot_scrap.columns]
-                    pivot_scrap = pivot_scrap[ordered_cols]
-                    
-                    fig_h1, ax_h1 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6)))
-                    import seaborn as sns
-                    sns.heatmap(pivot_scrap, annot=True, fmt=".1f", cmap="Reds", linewidths=1, linecolor='white', ax=ax_h1, annot_kws={"size": 10, "weight": "bold"})
-                    ax_h1.set_ylabel("Usage Month", fontweight='bold')
-                    ax_h1.set_xlabel("Production Period", fontweight='bold')
-                    plt.xticks(rotation=45, ha='right')
-                    fig_h1.tight_layout()
-                    st.pyplot(fig_h1)
-                    
-                    buf_h1 = io.BytesIO()
-                    fig_h1.savefig(buf_h1, format="png", dpi=300, bbox_inches="tight")
-                    buf_h1.seek(0)
-                    st.download_button(
-                        label="📸 Download Heatmap",
-                        data=buf_h1,
-                        file_name="Scrap_Heatmap.png",
-                        mime="image/png",
-                        type="primary",
-                        use_container_width=True,
-                        key="dl_heatmap"
-                    )
-                    plt.close(fig_h1) 
-                
-                with col_h2:
-                    st.subheader("8. Grade Distribution Analysis")
-                    if available_grades:
-                        grade_agg_usage = df_coil.groupby('Usage_Month')[available_grades].sum()
-                        grade_pct_usage = grade_agg_usage.div(grade_agg_usage.sum(axis=1), axis=0) * 100
-                        grade_pct_usage = grade_pct_usage.fillna(0)
-                        
-                        fig_g2, ax_g2 = plt.subplots(figsize=(8, max(4, len(pivot_scrap) * 0.6))) 
-                        color_map = {'A-B+': '#2e7d32', 'A-B': '#1f77b4', 'A-B-': '#ffa726', 'B+': '#ef5350', 'B': '#c62828'}
-                        plot_colors = [color_map.get(g, '#888') for g in available_grades]
-                        
-                        grade_pct_usage.plot(kind='bar', stacked=True, ax=ax_g2, color=plot_colors, width=0.8, edgecolor='white')
-                        ax_g2.set_ylabel("Percentage (%)", fontweight='bold')
-                        ax_g2.set_xlabel("Usage Month", fontweight='bold')
-                        ax_g2.legend(title="Quality Grade", bbox_to_anchor=(1.02, 1), loc='upper left')
-                        ax_g2.set_ylim(0, 105)
-                        
-                        for c in ax_g2.containers:
-                            labels = [f"{v.get_height():.0f}%" if v.get_height() > 5 else "" for v in c]
-                            ax_g2.bar_label(c, labels=labels, label_type='center', color='white', fontweight='bold', fontsize=9)
-                            
-                        plt.xticks(rotation=45, ha='right')
-                        if 'add_chart_border' in globals():
-                            add_chart_border(ax_g2)
-                        fig_g2.tight_layout()
-                        st.pyplot(fig_g2)
-                        
-                        buf_g2 = io.BytesIO()
-                        fig_g2.savefig(buf_g2, format="png", dpi=300, bbox_inches="tight")
-                        buf_g2.seek(0)
-                        st.download_button(
-                            label="📸 Download Grade Chart",
-                            data=buf_g2,
-                            file_name="Grade_Distribution.png",
-                            mime="image/png",
-                            type="primary",
-                            use_container_width=True,
-                            key="dl_grade"
-                        )
-                        plt.close(fig_g2)
-
-                st.markdown("---")
-                
-                # ==========================================
-                # 9 & 10. Split Coil Verification 
-                # ==========================================
-                st.subheader("9 & 10. Split Coil Verification")
+                st.subheader("Split Coil Verification")
                 st.info("Identifying identical coils processed on both machines to isolate machine impact.")
 
+                # Đã fix lỗi df_t6['Machine_Status'] bên trên nên giờ hàm groupby này sẽ chạy mượt mà
                 coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
                 coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
                 
