@@ -1159,27 +1159,53 @@ if uploaded_file is not None:
             # =========================================================================
 
             # =========================================================================
-            # 🔍 METHOD 3: TRACER BULLET LOGIC (DEBUGGING)
+            # =========================================================================
+            # 🔍 METHOD 3: MISSING COILS FINDER & TRACER BULLET (DEBUGGING)
             # =========================================================================
             st.markdown("---")
-            st.markdown("### 🔍 Debug: Tracer Bullet (Track a Specific Coil)")
-            test_coil = st.text_input("Enter the missing Coil ID to track its exact calculation path:")
-            if test_coil:
-                test_coil = test_coil.strip()
-                raw_history = df_sorted[df_sorted[COIL_ID_COL] == test_coil]
+            st.markdown("### 🕵️‍♂️ Debug: Missing Coils Finder & Tracer")
+            
+            col_find, col_trace = st.columns(2)
+            
+            with col_find:
+                st.write("**Step 1: Find Missing Coils**")
+                st.caption("Compare raw cuts vs final aggregated coils.")
+                available_months = sorted(df_sorted['Usage_Month'].unique(), reverse=True)
+                check_month = st.selectbox("Select Usage Month:", available_months)
                 
-                if raw_history.empty:
-                    st.error(f"❌ Coil ID '{test_coil}' not found in the valid usage data (Length might be 0 or Usage Date is missing).")
-                else:
-                    st.write(f"**Raw Usage History for Coil {test_coil}:**")
-                    st.dataframe(raw_history[['Usage_Date', 'Usage_Month', LEN_COL, SCRAP_COL]], use_container_width=True)
+                if check_month:
+                    raw_coils = set(df_sorted[df_sorted['Usage_Month'] == check_month][COIL_ID_COL].dropna().unique())
+                    final_coils = set(df_coil[df_coil['Usage_Month'] == check_month][COIL_ID_COL].dropna().unique())
+                    missing_coils = raw_coils - final_coils
                     
-                    final_month = df_coil[df_coil[COIL_ID_COL] == test_coil]['Usage_Month'].values
-                    if len(final_month) > 0:
-                        st.success(f"👉 Conclusion: The app assigned this coil to month: **{final_month[0]}** (Due to keep='last' logic).")
+                    if missing_coils:
+                        st.warning(f"⚠️ Found {len(missing_coils)} coils missing from final {check_month} aggregation:")
+                        st.code(", ".join(list(missing_coils)))
+                        st.caption("👉 Copy an ID above and paste it on the right.")
                     else:
-                        st.error("❌ This coil was completely dropped during data aggregation.")
+                        st.success(f"✅ 0 missing coils. Raw data perfectly matches final output for {check_month}.")
+
+            with col_trace:
+                st.write("**Step 2: Track Calculation Path**")
+                st.caption("See where the app moved the missing coil.")
+                test_coil = st.text_input("Enter Coil ID to investigate:")
+                
+                if test_coil:
+                    test_coil = test_coil.strip()
+                    raw_history = df_sorted[df_sorted[COIL_ID_COL] == test_coil]
+                    
+                    if raw_history.empty:
+                        st.error(f"❌ Coil ID '{test_coil}' not found in valid usage data.")
+                    else:
+                        st.dataframe(raw_history[['Usage_Date', 'Usage_Month', LEN_COL, SCRAP_COL]], use_container_width=True)
+                        
+                        final_month = df_coil[df_coil[COIL_ID_COL] == test_coil]['Usage_Month'].values
+                        if len(final_month) > 0:
+                            st.success(f"👉 Assigned to final month: **{final_month[0]}** (keep='last' logic).")
+                        else:
+                            st.error("❌ Dropped entirely during aggregation.")
             st.markdown("---")
+            # =========================================================================
             # =========================================================================
 
             if df_coil.empty:
