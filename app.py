@@ -345,88 +345,158 @@ if uploaded_file is not None:
                     ax.axvline(m, color=c_map[g], ls='--', lw=1.2)
                     m_info.append({'v': m, 'c': c_map[g], 'label': g})
 
-        if v_l:
-            if feat == 'Coating_Thickness_Avg':
-                # Fixed engineering range for coating thickness
-                fmin = 40.0
-                fmax = 47.0
-            
-                # Bin width = 0.5 μm
-                bins = np.arange(fmin, fmax + 0.5, 0.5)
-            
-                ax.hist(
-                    v_l,
-                    bins=bins,
-                    weights=w_l,
-                    color=clrs,
-                    stacked=True,
-                    edgecolor='white',
-                    alpha=0.7
-                )
-            
-                ax.set_xticks(np.arange(40.0, 47.1, 0.5))
+            if v_l:
+                if feat == 'Coating_Thickness_Avg':
+                    # Chỉ áp dụng riêng cho Coating Thickness
+                    coating_min = 40.0
+                    coating_max = 47.0
+                    coating_bins = np.arange(
+                        coating_min,
+                        coating_max + 0.5,
+                        0.5
+                    )
         
-        else:
-            ax.hist(
-                v_l,
-                bins=np.linspace(fmin, fmax, 16),
-                weights=w_l,
-                color=clrs,
-                stacked=True,
-                edgecolor='white',
-                alpha=0.7
-            )
-            m_info.sort(key=lambda x: x['v'])
-            x_range = fmax - fmin
-            min_gap = x_range * 0.045
-            positions = [info['v'] for info in m_info]
-            for _ in range(50):
-                moved = False
-                for i in range(1, len(positions)):
-                    if positions[i] - positions[i - 1] < min_gap:
-                        mid = (positions[i] + positions[i - 1]) / 2
-                        positions[i - 1] = mid - min_gap / 2
-                        positions[i] = mid + min_gap / 2
-                        moved = True
-                if not moved: break
-            
-            y_levels = [y_lim * (0.92 - (i % 4) * 0.13) for i in range(len(m_info))]
-            for i, info in enumerate(m_info):
-                x_pos = positions[i]
-                y_pos = y_levels[i]
-                ax.annotate(
-                    f"{info['v']:.1f}",
-                    xy=(info['v'], y_pos * 0.6), xytext=(x_pos, y_pos),
-                    color='white', fontweight='bold', fontsize=8, ha='center', va='center',
-                    bbox=dict(facecolor=info['c'], alpha=0.85, boxstyle='round,pad=0.25'),
-                    arrowprops=dict(arrowstyle='-', color=info['c'], lw=1.0, alpha=0.6) if abs(x_pos - info['v']) > min_gap * 0.3 else None
+                    ax.hist(
+                        v_l,
+                        bins=coating_bins,
+                        weights=w_l,
+                        color=clrs,
+                        stacked=True,
+                        edgecolor='white',
+                        alpha=0.7
+                    )
+        
+                    # Chỉ set trục X riêng cho coating
+                    ax.set_xlim(coating_min, coating_max)
+                    ax.set_xticks(np.arange(40.0, 47.1, 0.5))
+        
+                else:
+                    # Giữ nguyên histogram cũ cho YS / TS / EL / YPE
+                    ax.hist(
+                        v_l,
+                        bins=np.linspace(fmin, fmax, 16),
+                        weights=w_l,
+                        color=clrs,
+                        stacked=True,
+                        edgecolor='white',
+                        alpha=0.7
+                    )
+        
+                m_info.sort(key=lambda x: x['v'])
+                x_range = fmax - fmin
+                min_gap = x_range * 0.045
+                positions = [info['v'] for info in m_info]
+        
+                for _ in range(50):
+                    moved = False
+        
+                    for i in range(1, len(positions)):
+                        if positions[i] - positions[i - 1] < min_gap:
+                            mid = (positions[i] + positions[i - 1]) / 2
+                            positions[i - 1] = mid - min_gap / 2
+                            positions[i] = mid + min_gap / 2
+                            moved = True
+        
+                    if not moved:
+                        break
+        
+                y_levels = [
+                    y_lim * (0.92 - (i % 4) * 0.13)
+                    for i in range(len(m_info))
+                ]
+        
+                for i, info in enumerate(m_info):
+                    x_pos = positions[i]
+                    y_pos = y_levels[i]
+        
+                    ax.annotate(
+                        f"{info['v']:.1f}",
+                        xy=(info['v'], y_pos * 0.6),
+                        xytext=(x_pos, y_pos),
+                        color='white',
+                        fontweight='bold',
+                        fontsize=8,
+                        ha='center',
+                        va='center',
+                        bbox=dict(
+                            facecolor=info['c'],
+                            alpha=0.85,
+                            boxstyle='round,pad=0.25'
+                        ),
+                        arrowprops=dict(
+                            arrowstyle='-',
+                            color=info['c'],
+                            lw=1.0,
+                            alpha=0.6
+                        ) if abs(x_pos - info['v']) > min_gap * 0.3 else None
+                    )
+        
+            if thickness != 'Overall' and is_valid_for_control(period_label):
+                spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
+                lsl, usl, tgt = (
+                    spec.get('min'),
+                    spec.get('max'),
+                    spec.get('target')
                 )
-
-        if thickness != 'Overall' and is_valid_for_control(period_label):
-            spec = GLOBAL_SPECS.get(thickness, {}).get(feat, {})
-            lsl, usl, tgt = spec.get('min'), spec.get('max'), spec.get('target')
-            y_top = y_lim * 0.98
-            if lsl is not None:
-                ax.axvline(lsl, color='darkred', lw=2, ls='-', zorder=3)
-                ax.text(lsl, y_top, f' LSL\n {lsl}', color='darkred', fontsize=7.5, fontweight='bold', va='top', ha='left')
-            if usl is not None:
-                ax.axvline(usl, color='darkred', lw=2, ls='-', zorder=3)
-                ax.text(usl, y_top, f' USL\n {usl}', color='darkred', fontsize=7.5, fontweight='bold', va='top', ha='right')
-            if tgt is not None:
-                ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
-                ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
-
-        legend_loc = 'upper left' if feat == 'Coating_Thickness_Avg' else 'upper right'
-
-        ax.legend(
-            handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
-            loc=legend_loc,
-            fontsize=7
-        )
-        ax.set_xlim(fmin, fmax)
-        ax.set_ylim(0, y_lim)
-        ax.set_title(title, fontsize=10, fontweight='bold')
-        add_chart_border(ax)
+        
+                y_top = y_lim * 0.98
+        
+                if lsl is not None:
+                    ax.axvline(lsl, color='darkred', lw=2, ls='-', zorder=3)
+                    ax.text(
+                        lsl, y_top, f' LSL\n {lsl}',
+                        color='darkred',
+                        fontsize=7.5,
+                        fontweight='bold',
+                        va='top',
+                        ha='left'
+                    )
+        
+                if usl is not None:
+                    ax.axvline(usl, color='darkred', lw=2, ls='-', zorder=3)
+                    ax.text(
+                        usl, y_top, f' USL\n {usl}',
+                        color='darkred',
+                        fontsize=7.5,
+                        fontweight='bold',
+                        va='top',
+                        ha='right'
+                    )
+        
+                if tgt is not None:
+                    ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
+                    ax.text(
+                        tgt, y_top * 0.75, f' TGT\n {tgt}',
+                        color='#1a7abf',
+                        fontsize=7,
+                        fontweight='bold',
+                        va='top',
+                        ha='left'
+                    )
+        
+            legend_loc = (
+                'upper left'
+                if feat == 'Coating_Thickness_Avg'
+                else 'upper right'
+            )
+        
+            ax.legend(
+                handles=[
+                    Patch(facecolor=c_map[g], label=g)
+                    for g in base_grades
+                    if g in data.columns
+                ],
+                loc=legend_loc,
+                fontsize=7
+            )
+        
+            # Coating đã set_xlim riêng ở phía trên
+            if feat != 'Coating_Thickness_Avg':
+                ax.set_xlim(fmin, fmax)
+        
+            ax.set_ylim(0, y_lim)
+            ax.set_title(title, fontsize=10, fontweight='bold')
+            add_chart_border(ax)
 
     # --- TABS ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
