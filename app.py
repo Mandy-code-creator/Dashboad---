@@ -347,26 +347,26 @@ if uploaded_file is not None:
 
         if v_l:
             if feat == 'Coating_Thickness_Avg':
-            # Chỉ chỉnh riêng cho độ dày lớp phủ vì dữ liệu dao động rất hẹp
-            raw_min = data[feat].min()
-            raw_max = data[feat].max()
-            raw_range = raw_max - raw_min
-        
-            padding = max(raw_range * 0.20, 0.05)
-            fmin = raw_min - padding
-            fmax = raw_max + padding
-        
-            bin_count = min(8, max(4, data[feat].nunique()))
-        
-            ax.hist(
-                v_l,
-                bins=np.linspace(fmin, fmax, bin_count + 1),
-                weights=w_l,
-                color=clrs,
-                stacked=True,
-                edgecolor='white',
-                alpha=0.7
-            )
+                # Chỉ chỉnh riêng cho độ dày lớp phủ vì dữ liệu dao động rất hẹp
+                raw_min = data[feat].min()
+                raw_max = data[feat].max()
+                raw_range = raw_max - raw_min
+            
+                padding = max(raw_range * 0.20, 0.05)
+                fmin = raw_min - padding
+                fmax = raw_max + padding
+            
+                bin_count = min(8, max(4, data[feat].nunique()))
+            
+                ax.hist(
+                    v_l,
+                    bins=np.linspace(fmin, fmax, bin_count + 1),
+                    weights=w_l,
+                    color=clrs,
+                    stacked=True,
+                    edgecolor='white',
+                    alpha=0.7
+                )
             else:
                 ax.hist(
                     v_l,
