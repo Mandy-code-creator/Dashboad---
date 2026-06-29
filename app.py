@@ -137,7 +137,17 @@ if uploaded_file is not None:
     for f in mech_features:
         if f in df.columns:
             df[f] = pd.to_numeric(df[f], errors='coerce')
-
+    # --- COATING THICKNESS: Average of N / C / S ---
+    COATING_THICKNESS_COLS = ['塗層膜厚N', '塗層膜厚C', '塗層膜厚S']
+    available_coating_cols = [c for c in COATING_THICKNESS_COLS if c in df.columns]
+    
+    if available_coating_cols:
+        for c in available_coating_cols:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+    
+        df['Coating_Thickness_Avg'] = df[available_coating_cols].mean(axis=1)
+    else:
+        df['Coating_Thickness_Avg'] = np.nan
     LEN_COL = '實測長度'
     SCRAP_COL = '尾料剔退'
     if LEN_COL in df.columns:
@@ -578,99 +588,187 @@ if uploaded_file is not None:
             key="dl_grade_scrap"
         )
     # ==========================================================
+    # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
     # ==========================================================
     with tab3:
         st.header("3. Distribution & Process Capability (SPC)")
-        st.info("Visualizing mechanical property distribution. Capability indices (Cp, Cpk) apply from Q4 2025 onwards. Limit calculations strictly based on grades A or B (A-B+, A-B).")
-
+        st.info(
+            "Visualizing mechanical property and coating thickness distribution. "
+            "Capability indices (Cp, Cpk) apply from Q4 2025 onwards. "
+            "Limit calculations strictly based on grades A or B (A-B+, A-B)."
+        )
+    
+        # Giữ nguyên các chỉ tiêu cũ, chỉ bổ sung độ dày lớp phủ trung bình
+        spc_features = ['YS', 'TS', 'EL', 'YPE', 'Coating_Thickness_Avg']
+    
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
         thickness_list = sorted(df['Actual_Thickness'].dropna().unique())
-        
+    
         cap_summary_rows = []
         for _p in ordered_periods:
-            if _p == "2025 (Full Year)": continue 
+            if _p == "2025 (Full Year)":
+                continue
+    
             _dfp = df[df['Time_Group'] == _p]
             _dfp_valid = _dfp[_dfp['Valid_Qty'] > 0]
-            
+    
             for _t in thickness_list:
                 _dft = _dfp_valid[_dfp_valid['Actual_Thickness'] == _t]
-                if _dft.empty: continue
-                for _f in ['YS', 'TS', 'EL', 'YPE']:
+    
+                if _dft.empty:
+                    continue
+    
+                for _f in spc_features:
                     if _f in _dft.columns:
                         row = build_capability_summary(_dft, _f, _p, _t)
-                        if row: cap_summary_rows.append(row)
-
+    
+                        if row:
+                            cap_summary_rows.append(row)
+    
         if cap_summary_rows:
             cap_df = pd.DataFrame(cap_summary_rows)
-            
-            st.markdown("### 📋 Detailed Capability Log (Per Thickness - Grades A-B+, A-B Only)")
+    
+            # Đổi tên hiển thị để bảng dễ hiểu hơn
+            cap_df['Feature'] = cap_df['Feature'].replace({
+                'Coating_Thickness_Avg': 'Coating Thickness Avg'
+            })
+    
+            st.markdown(
+                "### 📋 Detailed Capability Log "
+                "(Per Thickness - Grades A-B+, A-B Only)"
+            )
+    
             def color_cpk_cell(val):
-                if pd.isna(val) or val == 'N/A' or val == '': return ''
+                if pd.isna(val) or val == 'N/A' or val == '':
+                    return ''
+    
                 try:
                     c = cpk_color(float(val))
-                    return f'background-color:{c};color:white;font-weight:bold;text-align:center'
-                except:
+                    return (
+                        f'background-color:{c};color:white;'
+                        'font-weight:bold;text-align:center'
+                    )
+                except Exception:
                     return ''
-
+    
             fmt = {
                 'Thickness': '{:.2f}',
-                'Mean': '{:.2f}', 'Std': '{:.3f}', 
-                'Cp': lambda v: f'{v:.3f}' if pd.notnull(v) else '—', 
+                'Mean': '{:.2f}',
+                'Std': '{:.3f}',
+                'Cp': lambda v: f'{v:.3f}' if pd.notnull(v) else '—',
                 'Cpk': lambda v: f'{v:.3f}' if pd.notnull(v) else '—',
                 'Ca (%)': lambda v: f'{v:.1f}%' if pd.notnull(v) else '—',
                 'LSL': lambda v: str(v) if pd.notnull(v) else '—',
                 'USL': lambda v: str(v) if pd.notnull(v) else '—',
             }
+    
             st.dataframe(
                 cap_df.style
                 .map(color_cpk_cell, subset=['Cpk'])
                 .format(fmt, na_rep='—'),
-                use_container_width=True, hide_index=True
+                use_container_width=True,
+                hide_index=True
             )
+    
             st.markdown("---")
-
+    
         for period in ordered_periods:
-            if period == "2025 (Full Year)": continue
+            if period == "2025 (Full Year)":
+                continue
+    
             df_p = df[df['Time_Group'] == period]
-            if df_p.empty: continue
-            
+    
+            if df_p.empty:
+                continue
+    
             st.markdown(f"## 📅 Period: **{period}**")
-            
-            ov_y = get_shared_y(df_p, ['YS', 'TS', 'EL', 'YPE'])
-            st.markdown(f"#### 🌐 Overall Summary (All Thicknesses)")
+    
+            available_features = [f for f in spc_features if f in df_p.columns]
+    
+            # Overall
+            ov_y = get_shared_y(df_p, available_features)
+    
+            st.markdown("#### 🌐 Overall Summary (All Thicknesses)")
             cols = st.columns(2)
-            for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_p.columns]):
+    
+            for idx, f in enumerate(available_features):
                 with cols[idx % 2]:
                     df_p_valid = df_p[df_p['Valid_Qty'] > 0]
                     vals_all = df_p_valid[f].dropna().values
-                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
-                    
+    
+                    render_capability_badge(
+                        calc_capability(vals_all, f, period, 'Overall'),
+                        f,
+                        period,
+                        'Overall'
+                    )
+    
+                    chart_title = (
+                        f"Coating Thickness Avg (Overall - {period})"
+                        if f == 'Coating_Thickness_Avg'
+                        else f"{f} (Overall - {period})"
+                    )
+    
                     fig, ax = plt.subplots(figsize=(8, 4.5))
-                    plot_dist(ax, df_p, f, f"{f} (Overall - {period})", ov_y, period, 'Overall')
+                    plot_dist(
+                        ax,
+                        df_p,
+                        f,
+                        chart_title,
+                        ov_y,
+                        period,
+                        'Overall'
+                    )
                     fig.tight_layout()
                     st.pyplot(fig)
-                    plt.close(fig)  # FIX: Ngăn sập RAM
-            
+                    plt.close(fig)
+    
+            # Per steel thickness
             for thick in thickness_list:
                 df_t = df_p[df_p['Actual_Thickness'] == thick]
-                if df_t.empty: continue
-                
+    
+                if df_t.empty:
+                    continue
+    
                 st.markdown(f"#### 📏 Thickness: **{thick}mm**")
-                ly = get_shared_y(df_t, ['YS', 'TS', 'EL', 'YPE'])
+    
+                available_t_features = [f for f in spc_features if f in df_t.columns]
+                ly = get_shared_y(df_t, available_t_features)
                 tcols = st.columns(2)
-                
-                for idx, f in enumerate([x for x in ['YS', 'TS', 'EL', 'YPE'] if x in df_t.columns]):
+    
+                for idx, f in enumerate(available_t_features):
                     with tcols[idx % 2]:
                         df_t_valid = df_t[df_t['Valid_Qty'] > 0]
                         vals_t = df_t_valid[f].dropna().values
-                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
-                        
+    
+                        render_capability_badge(
+                            calc_capability(vals_t, f, period, thick),
+                            f,
+                            period,
+                            thick
+                        )
+    
+                        chart_title = (
+                            f"Coating Thickness Avg (Thick:{thick} - {period})"
+                            if f == 'Coating_Thickness_Avg'
+                            else f"{f} (Thick:{thick} - {period})"
+                        )
+    
                         fig, ax = plt.subplots(figsize=(8, 4.5))
-                        plot_dist(ax, df_t, f, f"{f} (Thick:{thick} - {period})", ly, period, thick)
+                        plot_dist(
+                            ax,
+                            df_t,
+                            f,
+                            chart_title,
+                            ly,
+                            period,
+                            thick
+                        )
                         fig.tight_layout()
                         st.pyplot(fig)
-                        plt.close(fig)  # FIX: Ngăn sập RAM
+                        plt.close(fig)
+    
             st.markdown("---")
 
     # ==========================================================
