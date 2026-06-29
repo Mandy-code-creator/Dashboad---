@@ -346,7 +346,37 @@ if uploaded_file is not None:
                     m_info.append({'v': m, 'c': c_map[g], 'label': g})
 
         if v_l:
-            ax.hist(v_l, bins=np.linspace(fmin, fmax, 16), weights=w_l, color=clrs, stacked=True, edgecolor='white', alpha=0.7)
+            if feat == 'Coating_Thickness_Avg':
+            # Chỉ chỉnh riêng cho độ dày lớp phủ vì dữ liệu dao động rất hẹp
+            raw_min = data[feat].min()
+            raw_max = data[feat].max()
+            raw_range = raw_max - raw_min
+        
+            padding = max(raw_range * 0.20, 0.05)
+            fmin = raw_min - padding
+            fmax = raw_max + padding
+        
+            bin_count = min(8, max(4, data[feat].nunique()))
+        
+            ax.hist(
+                v_l,
+                bins=np.linspace(fmin, fmax, bin_count + 1),
+                weights=w_l,
+                color=clrs,
+                stacked=True,
+                edgecolor='white',
+                alpha=0.7
+            )
+        else:
+            ax.hist(
+                v_l,
+                bins=np.linspace(fmin, fmax, 16),
+                weights=w_l,
+                color=clrs,
+                stacked=True,
+                edgecolor='white',
+                alpha=0.7
+            )
             m_info.sort(key=lambda x: x['v'])
             x_range = fmax - fmin
             min_gap = x_range * 0.045
@@ -387,8 +417,13 @@ if uploaded_file is not None:
                 ax.axvline(tgt, color='#1a7abf', lw=1.5, ls=':', zorder=3)
                 ax.text(tgt, y_top * 0.75, f' TGT\n {tgt}', color='#1a7abf', fontsize=7, fontweight='bold', va='top', ha='left')
 
-        ax.legend(handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
-                  loc='upper right', fontsize=7)
+        legend_loc = 'upper left' if feat == 'Coating_Thickness_Avg' else 'upper right'
+
+        ax.legend(
+            handles=[Patch(facecolor=c_map[g], label=g) for g in base_grades if g in data.columns],
+            loc=legend_loc,
+            fontsize=7
+        )
         ax.set_xlim(fmin, fmax)
         ax.set_ylim(0, y_lim)
         ax.set_title(title, fontsize=10, fontweight='bold')
