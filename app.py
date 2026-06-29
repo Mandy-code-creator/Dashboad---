@@ -897,7 +897,7 @@ if uploaded_file is not None:
             else:
                 plot_df_base = df_t4
                 
-            for t4_feat in ['YS', 'TS', 'EL', 'YPE']:
+            for t4_feat in ['YS', 'TS', 'EL', 'YPE','Coating_Thickness_Avg']:
                 if t4_feat not in plot_df_base.columns:
                     continue
                     
@@ -907,7 +907,13 @@ if uploaded_file is not None:
                     continue
                     
                 st.markdown("---")
-                st.subheader(f"Feature: {t4_feat}")
+                feature_name = (
+                    "Coating Thickness Avg"
+                    if t4_feat == 'Coating_Thickness_Avg'
+                    else t4_feat
+                )
+                
+                st.subheader(f"Feature: {feature_name}")
                 
                 vals_all = plot_df[t4_feat].values
                 cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
@@ -967,7 +973,7 @@ if uploaded_file is not None:
                 y_pad = (y_max - y_min) * 0.4 if (y_max - y_min) != 0 else 1
                 ax_i.set_ylim(y_min - y_pad*0.4, y_max + y_pad*1.2)
                 
-                ax_i.set_title(f"Individual (I) Chart - {t4_feat} ({t4_thick}mm)", fontweight='bold')
+                ax_i.set_title(f"Individual (I) Chart - {feature_name} ({t4_thick}mm)",fontweight='bold')
                 ax_i.set_ylabel("Value")
                 
                 ax_i.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1, fontsize=8)
@@ -1021,7 +1027,8 @@ if uploaded_file is not None:
                     pptx_stream.seek(0)
                     
                     st.download_button(
-                        label=f"📥 Download {t4_feat} Chart (.pptx)",
+                        label=f"📥 Download {feature_name} Chart (.pptx)",
+                        file_name=f"IMR_Chart_{t4_feat}.pptx",,
                         data=pptx_stream,
                         file_name=f"IMR_Chart_{t4_feat}.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
