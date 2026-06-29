@@ -367,16 +367,16 @@ if uploaded_file is not None:
                 edgecolor='white',
                 alpha=0.7
             )
-        else:
-            ax.hist(
-                v_l,
-                bins=np.linspace(fmin, fmax, 16),
-                weights=w_l,
-                color=clrs,
-                stacked=True,
-                edgecolor='white',
-                alpha=0.7
-            )
+            else:
+                ax.hist(
+                    v_l,
+                    bins=np.linspace(fmin, fmax, 16),
+                    weights=w_l,
+                    color=clrs,
+                    stacked=True,
+                    edgecolor='white',
+                    alpha=0.7
+                )
             m_info.sort(key=lambda x: x['v'])
             x_range = fmax - fmin
             min_gap = x_range * 0.045
