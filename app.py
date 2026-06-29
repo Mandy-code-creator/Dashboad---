@@ -1028,7 +1028,6 @@ if uploaded_file is not None:
                     
                     st.download_button(
                         label=f"📥 Download {feature_name} Chart (.pptx)",
-                        file_name=f"IMR_Chart_{t4_feat}.pptx",
                         data=pptx_stream,
                         file_name=f"IMR_Chart_{t4_feat}.pptx",
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
