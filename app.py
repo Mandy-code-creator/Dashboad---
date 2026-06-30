@@ -1235,14 +1235,32 @@ if uploaded_file is not None:
     
                     add_chart_border(ax_mr)
     
-                    step = max(1, len(vals) // 15)
-    
-                    ax_mr.set_xticks(range(0, len(vals), step))
+                    # --------------------------------------------------
+                    # X-axis: group labels by month
+                    # --------------------------------------------------
+                    month_labels = plot_df['Production_Date'].dt.strftime('%Y-%m')
+                    month_change_idx = np.where(
+                        month_labels.ne(month_labels.shift())
+                    )[0]
+                    
+                    ax_mr.set_xticks(month_change_idx)
                     ax_mr.set_xticklabels(
-                        dates.iloc[::step],
-                        rotation=45,
-                        ha='right'
+                        month_labels.iloc[month_change_idx],
+                        rotation=0,
+                        ha='center',
+                        fontsize=9,
+                        fontweight='bold'
                     )
+                    
+                    # Add light separator between months
+                    for idx in month_change_idx[1:]:
+                        ax_mr.axvline(
+                            idx - 0.5,
+                            color='#B0B0B0',
+                            linestyle=':',
+                            linewidth=0.8,
+                            alpha=0.8
+                        )
     
                     fig_imr.tight_layout()
                     st.pyplot(fig_imr)
