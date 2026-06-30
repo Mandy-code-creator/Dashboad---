@@ -881,164 +881,406 @@ if uploaded_file is not None:
     # ==========================================================
     with tab4:
         st.header("4. Post-Control Tracking (I-MR Charts)")
-        st.info("Tracking process stability for production from 2026 onwards. Limits and charts calculated ONLY based on grades A or B (A-B+, A-B).")
-        
+        st.info(
+            "Tracking process stability for production from 2026 onwards. "
+            "Limits and charts calculated ONLY based on grades A or B (A-B+, A-B)."
+        )
+    
         df_t4 = df[df['Production_Date'].dt.year >= 2026].copy()
         df_t4 = df_t4[df_t4['Valid_Qty'] > 0]
-        
+    
         if df_t4.empty:
             st.warning("No valid data available for 2026 onwards.")
+    
         else:
-            thicknesses = ['Overall'] + sorted(df_t4['Actual_Thickness'].dropna().unique().tolist())
-            t4_thick = st.selectbox("Select Thickness Category:", thicknesses)
-            
+            thicknesses = ['Overall'] + sorted(
+                df_t4['Actual_Thickness'].dropna().unique().tolist()
+            )
+    
+            t4_thick = st.selectbox(
+                "Select Thickness Category:",
+                thicknesses,
+                key="t4_thickness"
+            )
+    
             if t4_thick != 'Overall':
-                plot_df_base = df_t4[df_t4['Actual_Thickness'] == t4_thick]
+                plot_df_base = df_t4[
+                    df_t4['Actual_Thickness'] == t4_thick
+                ].copy()
             else:
-                plot_df_base = df_t4
-                
-            for t4_feat in ['YS', 'TS', 'EL', 'YPE','Coating_Thickness_Avg']:
+                plot_df_base = df_t4.copy()
+    
+            t4_features = [
+                'YS',
+                'TS',
+                'EL',
+                'YPE',
+                'Coating_Thickness_Avg'
+            ]
+    
+            coating_groups = [
+                '25 min (Estimated)',
+                '40 min (Estimated)'
+            ]
+    
+            for t4_feat in t4_features:
                 if t4_feat not in plot_df_base.columns:
                     continue
-                    
-                plot_df = plot_df_base.sort_values('Production_Date').dropna(subset=[t4_feat])
-                
-                if len(plot_df) < 2:
-                    continue
-                    
-                st.markdown("---")
-                feature_name = (
-                    "Coating Thickness Avg"
-                    if t4_feat == 'Coating_Thickness_Avg'
-                    else t4_feat
-                )
-                
-                st.subheader(f"Feature: {feature_name}")
-                
-                vals_all = plot_df[t4_feat].values
-                cap_data = calc_capability(vals_all, t4_feat, '2026-01', t4_thick)
-                
-                render_capability_badge(cap_data, t4_feat, '2026-01', t4_thick)
-                
-                dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
-                vals = plot_df[t4_feat].values
-                
-                mean_v = np.mean(vals)
-                mr = np.abs(np.diff(vals))
-                mr_mean = np.mean(mr)
-                
-                ucl_i = mean_v + 2.66 * mr_mean
-                lcl_i = max(0, mean_v - 2.66 * mr_mean)
-                ucl_mr = 3.267 * mr_mean
-                
-                fig_imr, (ax_i, ax_mr) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
-                
-                # I-Chart
-                ax_i.plot(vals, marker='o', color='#1f77b4', linestyle='-', linewidth=1.5, markersize=5)
-                
-                # Statistical Control Limits
-                ax_i.axhline(mean_v, color='green', linestyle='--', label=f'Mean: {mean_v:.2f}')
-                ax_i.axhline(ucl_i, color='red', linestyle='--', label=f'UCL: {ucl_i:.2f}')
-                ax_i.axhline(lcl_i, color='red', linestyle='--', label=f'LCL: {lcl_i:.2f}')
-                
-                # User Input Specification Limits (USL/LSL/Target) & Mill Range
-                spec = GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {}) if t4_thick != 'Overall' else {}
-                lsl = spec.get('min')
-                usl = spec.get('max')
-                tgt = spec.get('target')
-
-                if lsl is not None:
-                    ax_i.axhline(lsl, color='darkred', linestyle='-', linewidth=2, label=f'LSL (Spec Min): {lsl}')
-                if usl is not None:
-                    ax_i.axhline(usl, color='darkred', linestyle='-', linewidth=2, label=f'USL (Spec Max): {usl}')
-                if tgt is not None:
-                    ax_i.axhline(tgt, color='blue', linestyle=':', linewidth=1.5, label=f'Target: {tgt}')
-                
-                # Catch out of bounds errors
-                out_condition = (vals > ucl_i) | (vals < lcl_i)
-                
-                if usl is not None:
-                    out_condition = out_condition | (vals > usl)
-                if lsl is not None:
-                    out_condition = out_condition | (vals < lsl)
-
-                out_i = np.where(out_condition)[0]
-                
-                if len(out_i) > 0:
-                    ax_i.scatter(out_i, vals[out_i], color='red', zorder=5, s=50, label="Out of Bounds (UCL/LCL/Spec)")
-                    
-                all_y_vals = [v for v in [np.max(vals), np.min(vals), ucl_i, lcl_i, usl, lsl] if v is not None]
-                y_max = max(all_y_vals) if all_y_vals else 10
-                y_min = min(all_y_vals) if all_y_vals else 0
-                y_pad = (y_max - y_min) * 0.4 if (y_max - y_min) != 0 else 1
-                ax_i.set_ylim(y_min - y_pad*0.4, y_max + y_pad*1.2)
-                
-                ax_i.set_title(f"Individual (I) Chart - {feature_name} ({t4_thick}mm)",fontweight='bold')
-                ax_i.set_ylabel("Value")
-                
-                ax_i.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1, fontsize=8)
-                if 'add_chart_border' in globals():
-                    add_chart_border(ax_i)
-                ax_i.set_xticks([]) 
-                
-                # MR-Chart
-                ax_mr.plot(range(1, len(vals)), mr, marker='o', color='#ff7f0e', linestyle='-', linewidth=1.5, markersize=5)
-                ax_mr.axhline(mr_mean, color='green', linestyle='--', label=f'MR Mean: {mr_mean:.2f}')
-                ax_mr.axhline(ucl_mr, color='red', linestyle='--', label=f'UCL: {ucl_mr:.2f}')
-                
-                out_mr = np.where(mr > ucl_mr)[0]
-                if len(out_mr) > 0:
-                    ax_mr.scatter(out_mr + 1, mr[out_mr], color='red', zorder=5, s=50)
-                    
-                ax_mr.set_title("Moving Range (MR) Chart", fontweight='bold')
-                ax_mr.set_ylabel("Range")
-                
-                ax_mr.legend(bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=8)
-                if 'add_chart_border' in globals():
-                    add_chart_border(ax_mr)
-                
-                step = max(1, len(vals) // 15)
-                ax_mr.set_xticks(range(0, len(vals), step))
-                ax_mr.set_xticklabels(dates.iloc[::step], rotation=45, ha='right')
-                
-                fig_imr.tight_layout()
-                st.pyplot(fig_imr)
-                
-                # ==========================================
-                # PPTX EXPORT FEATURE
-                # ==========================================
-                img_stream = io.BytesIO()
-                fig_imr.savefig(img_stream, format='png', bbox_inches='tight', dpi=300)
-                img_stream.seek(0)
-                
-                try:
-                    from pptx import Presentation
-                    from pptx.util import Inches
-                    
-                    prs = Presentation()
-                    blank_slide_layout = prs.slide_layouts[6] # Layout 6 is blank
-                    slide = prs.slides.add_slide(blank_slide_layout)
-                    
-                    # Insert the image into the slide. Dimensions are tailored to fit standard widescreen.
-                    slide.shapes.add_picture(img_stream, Inches(0.5), Inches(0.5), width=Inches(9))
-                    
-                    pptx_stream = io.BytesIO()
-                    prs.save(pptx_stream)
-                    pptx_stream.seek(0)
-                    
-                    st.download_button(
-                        label=f"📥 Download {feature_name} Chart (.pptx)",
-                        data=pptx_stream,
-                        file_name=f"IMR_Chart_{t4_feat}.pptx",
-                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                        type="primary",
-                        use_container_width=True,
-                        key=f"dl_ppt_{t4_feat}_{t4_thick}"
+    
+                # --------------------------------------------------
+                # Coating Thickness: tách riêng 25 min và 40 min
+                # --------------------------------------------------
+                if t4_feat == 'Coating_Thickness_Avg':
+                    group_datasets = []
+    
+                    for coating_group in coating_groups:
+                        group_df = plot_df_base[
+                            plot_df_base['Coating_Group'] == coating_group
+                        ].copy()
+    
+                        if not group_df.empty:
+                            group_datasets.append((coating_group, group_df))
+    
+                else:
+                    # Cơ tính vẫn giữ logic cũ: không tách theo coating group
+                    group_datasets = [('All Coating Groups', plot_df_base.copy())]
+    
+                for coating_group_name, feature_base_df in group_datasets:
+                    plot_df = (
+                        feature_base_df
+                        .sort_values('Production_Date')
+                        .dropna(subset=[t4_feat])
+                        .copy()
                     )
-                except ImportError:
-                    st.error("Missing dependency. Please run `pip install python-pptx` to enable PowerPoint export.")
-
-                plt.close(fig_imr)  # Ngăn chặn tràn bộ nhớ RAM
+    
+                    if len(plot_df) < 2:
+                        continue
+    
+                    st.markdown("---")
+    
+                    feature_name = (
+                        "Coating Thickness Avg"
+                        if t4_feat == 'Coating_Thickness_Avg'
+                        else t4_feat
+                    )
+    
+                    if t4_feat == 'Coating_Thickness_Avg':
+                        st.subheader(
+                            f"Feature: {feature_name} | {coating_group_name}"
+                        )
+                    else:
+                        st.subheader(f"Feature: {feature_name}")
+    
+                    vals_all = plot_df[t4_feat].values
+    
+                    # Coating không dùng chung spec của YS/TS/EL/YPE
+                    cap_thickness = (
+                        t4_thick
+                        if t4_feat != 'Coating_Thickness_Avg'
+                        else 'Overall'
+                    )
+    
+                    cap_data = calc_capability(
+                        vals_all,
+                        t4_feat,
+                        '2026-01',
+                        cap_thickness
+                    )
+    
+                    render_capability_badge(
+                        cap_data,
+                        t4_feat,
+                        '2026-01',
+                        cap_thickness
+                    )
+    
+                    dates = plot_df['Production_Date'].dt.strftime('%Y-%m-%d')
+                    vals = plot_df[t4_feat].values
+    
+                    mean_v = np.mean(vals)
+                    mr = np.abs(np.diff(vals))
+                    mr_mean = np.mean(mr)
+    
+                    ucl_i = mean_v + 2.66 * mr_mean
+                    lcl_i = max(0, mean_v - 2.66 * mr_mean)
+                    ucl_mr = 3.267 * mr_mean
+    
+                    fig_imr, (ax_i, ax_mr) = plt.subplots(
+                        2,
+                        1,
+                        figsize=(12, 8),
+                        gridspec_kw={'height_ratios': [2, 1]}
+                    )
+    
+                    # ==================================================
+                    # I-CHART
+                    # ==================================================
+                    ax_i.plot(
+                        vals,
+                        marker='o',
+                        color='#1f77b4',
+                        linestyle='-',
+                        linewidth=1.5,
+                        markersize=5
+                    )
+    
+                    ax_i.axhline(
+                        mean_v,
+                        color='green',
+                        linestyle='--',
+                        label=f'Mean: {mean_v:.2f}'
+                    )
+    
+                    ax_i.axhline(
+                        ucl_i,
+                        color='red',
+                        linestyle='--',
+                        label=f'UCL: {ucl_i:.2f}'
+                    )
+    
+                    ax_i.axhline(
+                        lcl_i,
+                        color='red',
+                        linestyle='--',
+                        label=f'LCL: {lcl_i:.2f}'
+                    )
+    
+                    # Chỉ lấy spec cho YS / TS / EL / YPE
+                    spec = (
+                        GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
+                        if (
+                            t4_thick != 'Overall'
+                            and t4_feat != 'Coating_Thickness_Avg'
+                        )
+                        else {}
+                    )
+    
+                    lsl = spec.get('min')
+                    usl = spec.get('max')
+                    tgt = spec.get('target')
+    
+                    if lsl is not None:
+                        ax_i.axhline(
+                            lsl,
+                            color='darkred',
+                            linestyle='-',
+                            linewidth=2,
+                            label=f'LSL (Spec Min): {lsl}'
+                        )
+    
+                    if usl is not None:
+                        ax_i.axhline(
+                            usl,
+                            color='darkred',
+                            linestyle='-',
+                            linewidth=2,
+                            label=f'USL (Spec Max): {usl}'
+                        )
+    
+                    if tgt is not None:
+                        ax_i.axhline(
+                            tgt,
+                            color='blue',
+                            linestyle=':',
+                            linewidth=1.5,
+                            label=f'Target: {tgt}'
+                        )
+    
+                    out_condition = (vals > ucl_i) | (vals < lcl_i)
+    
+                    if usl is not None:
+                        out_condition = out_condition | (vals > usl)
+    
+                    if lsl is not None:
+                        out_condition = out_condition | (vals < lsl)
+    
+                    out_i = np.where(out_condition)[0]
+    
+                    if len(out_i) > 0:
+                        ax_i.scatter(
+                            out_i,
+                            vals[out_i],
+                            color='red',
+                            zorder=5,
+                            s=50,
+                            label="Out of Bounds (UCL/LCL/Spec)"
+                        )
+    
+                    all_y_vals = [
+                        v for v in [
+                            np.max(vals),
+                            np.min(vals),
+                            ucl_i,
+                            lcl_i,
+                            usl,
+                            lsl
+                        ]
+                        if v is not None
+                    ]
+    
+                    y_max = max(all_y_vals) if all_y_vals else 10
+                    y_min = min(all_y_vals) if all_y_vals else 0
+    
+                    y_pad = (
+                        (y_max - y_min) * 0.4
+                        if (y_max - y_min) != 0
+                        else 1
+                    )
+    
+                    ax_i.set_ylim(
+                        y_min - y_pad * 0.4,
+                        y_max + y_pad * 1.2
+                    )
+    
+                    title_suffix = (
+                        f"{t4_thick}mm | {coating_group_name}"
+                        if t4_feat == 'Coating_Thickness_Avg'
+                        else f"{t4_thick}mm"
+                    )
+    
+                    ax_i.set_title(
+                        f"Individual (I) Chart - {feature_name} ({title_suffix})",
+                        fontweight='bold'
+                    )
+    
+                    ax_i.set_ylabel("Value")
+                    ax_i.set_xticks([])
+    
+                    ax_i.legend(
+                        bbox_to_anchor=(1.01, 1),
+                        loc='upper left',
+                        ncol=1,
+                        fontsize=8
+                    )
+    
+                    add_chart_border(ax_i)
+    
+                    # ==================================================
+                    # MR-CHART
+                    # ==================================================
+                    ax_mr.plot(
+                        range(1, len(vals)),
+                        mr,
+                        marker='o',
+                        color='#ff7f0e',
+                        linestyle='-',
+                        linewidth=1.5,
+                        markersize=5
+                    )
+    
+                    ax_mr.axhline(
+                        mr_mean,
+                        color='green',
+                        linestyle='--',
+                        label=f'MR Mean: {mr_mean:.2f}'
+                    )
+    
+                    ax_mr.axhline(
+                        ucl_mr,
+                        color='red',
+                        linestyle='--',
+                        label=f'UCL: {ucl_mr:.2f}'
+                    )
+    
+                    out_mr = np.where(mr > ucl_mr)[0]
+    
+                    if len(out_mr) > 0:
+                        ax_mr.scatter(
+                            out_mr + 1,
+                            mr[out_mr],
+                            color='red',
+                            zorder=5,
+                            s=50
+                        )
+    
+                    ax_mr.set_title(
+                        "Moving Range (MR) Chart",
+                        fontweight='bold'
+                    )
+    
+                    ax_mr.set_ylabel("Range")
+    
+                    ax_mr.legend(
+                        bbox_to_anchor=(1.01, 1),
+                        loc='upper left',
+                        fontsize=8
+                    )
+    
+                    add_chart_border(ax_mr)
+    
+                    step = max(1, len(vals) // 15)
+    
+                    ax_mr.set_xticks(range(0, len(vals), step))
+                    ax_mr.set_xticklabels(
+                        dates.iloc[::step],
+                        rotation=45,
+                        ha='right'
+                    )
+    
+                    fig_imr.tight_layout()
+                    st.pyplot(fig_imr)
+    
+                    # ==================================================
+                    # PPTX EXPORT
+                    # ==================================================
+                    img_stream = io.BytesIO()
+                    fig_imr.savefig(
+                        img_stream,
+                        format='png',
+                        bbox_inches='tight',
+                        dpi=300
+                    )
+                    img_stream.seek(0)
+    
+                    try:
+                        from pptx import Presentation
+                        from pptx.util import Inches
+    
+                        prs = Presentation()
+                        blank_slide_layout = prs.slide_layouts[6]
+                        slide = prs.slides.add_slide(blank_slide_layout)
+    
+                        slide.shapes.add_picture(
+                            img_stream,
+                            Inches(0.5),
+                            Inches(0.5),
+                            width=Inches(9)
+                        )
+    
+                        pptx_stream = io.BytesIO()
+                        prs.save(pptx_stream)
+                        pptx_stream.seek(0)
+    
+                        safe_group_name = (
+                            coating_group_name
+                            .replace(" ", "_")
+                            .replace("(", "")
+                            .replace(")", "")
+                        )
+    
+                        st.download_button(
+                            label=f"📥 Download {feature_name} Chart (.pptx)",
+                            data=pptx_stream,
+                            file_name=(
+                                f"IMR_Chart_{t4_feat}_"
+                                f"{t4_thick}_{safe_group_name}.pptx"
+                            ),
+                            mime=(
+                                "application/vnd.openxmlformats-officedocument."
+                                "presentationml.presentation"
+                            ),
+                            type="primary",
+                            use_container_width=True,
+                            key=f"dl_ppt_{t4_feat}_{t4_thick}_{safe_group_name}"
+                        )
+    
+                    except ImportError:
+                        st.error(
+                            "Missing dependency. Please run "
+                            "`pip install python-pptx` to enable PowerPoint export."
+                        )
+    
+                    plt.close(fig_imr)
 
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
