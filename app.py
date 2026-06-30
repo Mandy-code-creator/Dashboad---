@@ -148,6 +148,20 @@ if uploaded_file is not None:
         df['Coating_Thickness_Avg'] = df[available_coating_cols].mean(axis=1)
     else:
         df['Coating_Thickness_Avg'] = np.nan
+    # --- Estimated coating group based on actual average thickness ---
+    df['Coating_Group'] = np.select(
+        [
+            df['Coating_Thickness_Avg'].isna(),
+            df['Coating_Thickness_Avg'] < 32.5,
+            df['Coating_Thickness_Avg'] >= 32.5
+        ],
+        [
+            'Unknown',
+            '25 min (Estimated)',
+            '40 min (Estimated)'
+        ],
+        default='Unknown'
+    )
     LEN_COL = '實測長度'
     SCRAP_COL = '尾料剔退'
     if LEN_COL in df.columns:
