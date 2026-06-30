@@ -1059,19 +1059,32 @@ if uploaded_file is not None:
                         label=f'LCL: {lcl_i:.2f}'
                     )
     
-                    # Chỉ lấy spec cho YS / TS / EL / YPE
-                    spec = (
-                        GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
-                        if (
-                            t4_thick != 'Overall'
-                            and t4_feat != 'Coating_Thickness_Avg'
+                    # ==================================================
+                    # SPEC LIMITS
+                    # ==================================================
+                    if t4_feat == 'Coating_Thickness_Avg':
+                        # Estimated coating group: only show lower specification limit
+                        if coating_group_name == '25 min (Estimated)':
+                            lsl = 25.0
+                        elif coating_group_name == '40 min (Estimated)':
+                            lsl = 40.0
+                        else:
+                            lsl = None
+                    
+                        usl = None
+                        tgt = None
+                    
+                    else:
+                        # Keep original mechanical-property specification logic
+                        spec = (
+                            GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
+                            if t4_thick != 'Overall'
+                            else {}
                         )
-                        else {}
-                    )
-    
-                    lsl = spec.get('min')
-                    usl = spec.get('max')
-                    tgt = spec.get('target')
+                    
+                        lsl = spec.get('min')
+                        usl = spec.get('max')
+                        tgt = spec.get('target')
     
                     if lsl is not None:
                         ax_i.axhline(
