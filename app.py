@@ -1236,30 +1236,42 @@ if uploaded_file is not None:
                     add_chart_border(ax_mr)
     
                     # --------------------------------------------------
-                    # X-axis: group labels by month
+                    # --------------------------------------------------
+                    # X-axis: monthly labels and month separators
                     # --------------------------------------------------
                     month_labels = plot_df['Production_Date'].dt.strftime('%Y-%m')
-                    month_change_idx = np.where(
-                        month_labels.ne(month_labels.shift())
-                    )[0]
+                    month_start_idx = np.where(month_labels.ne(month_labels.shift()))[0]
                     
-                    ax_mr.set_xticks(month_change_idx)
+                    # Nhãn tháng chỉ đặt ở MR chart
+                    ax_mr.set_xticks(month_start_idx)
                     ax_mr.set_xticklabels(
-                        month_labels.iloc[month_change_idx],
+                        month_labels.iloc[month_start_idx],
                         rotation=0,
                         ha='center',
                         fontsize=9,
                         fontweight='bold'
                     )
                     
-                    # Add light separator between months
-                    for idx in month_change_idx[1:]:
-                        ax_mr.axvline(
-                            idx - 0.5,
-                            color='#B0B0B0',
+                    # Đường dọc phân cách tháng trên cả I Chart và MR Chart
+                    for idx in month_start_idx[1:]:
+                        separator_x = idx - 0.5
+                    
+                        ax_i.axvline(
+                            separator_x,
+                            color='#9E9E9E',
                             linestyle=':',
-                            linewidth=0.8,
-                            alpha=0.8
+                            linewidth=1.0,
+                            alpha=0.85,
+                            zorder=0
+                        )
+                    
+                        ax_mr.axvline(
+                            separator_x,
+                            color='#9E9E9E',
+                            linestyle=':',
+                            linewidth=1.0,
+                            alpha=0.85,
+                            zorder=0
                         )
     
                     fig_imr.tight_layout()
