@@ -1603,21 +1603,22 @@ if uploaded_file is not None:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
         
+        # --- BULLETPROOF FIX: HARDCODE THE EXACT PRODUCTION DATE COLUMN ---
+        # ⚠️ Replace 'YOUR_ACTUAL_DATE_COLUMN' with the exact name of your production date column!
+        PROD_DATE_COL = 'YOUR_ACTUAL_DATE_COLUMN' 
+        
+        if PROD_DATE_COL in df.columns:
+            df['Time_Group'] = pd.to_datetime(df[PROD_DATE_COL], errors='coerce').dt.strftime('%Y-%m')
+        else:
+            st.error(f"System Error: Column '{PROD_DATE_COL}' not found in dataframe. Matrix rows will not display correct months. Please update the column name.")
+        # ------------------------------------------------------------------
+
         possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
         COIL_ID_COL = '鋼捲號碼'
         
         possible_wt_cols = ['重量', 'Weight', 'WT', 'Net_Weight', 'Net Weight']
         WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
-
-        # --- APPLIED FIX: OVERWRITE PRODUCTION TIIME_GROUP TO MONTHLY FORMAT (YYYY-MM) ---
-        # Automatically detect the original production date column to override the quarterly group
-        possible_prod_date_cols = ['生產日期', 'Production Date', 'Date', '製造日期', 'Prod_Date']
-        PROD_DATE_COL = next((c for c in possible_prod_date_cols if c in df.columns), None)
-        
-        if PROD_DATE_COL:
-            df['Time_Group'] = pd.to_datetime(df[PROD_DATE_COL], errors='coerce').dt.strftime('%Y-%m')
-        # ---------------------------------------------------------------------------------
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
             # --- FIX: Remove virtual 2025 (Full Year) row from raw data for accurate coil aggregation ---
