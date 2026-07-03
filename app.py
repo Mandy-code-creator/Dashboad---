@@ -1795,81 +1795,65 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
-                # Production vs Usage Quality Matrix
+               # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
-
+                
                 available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
                 
-                # --- LOGIC TẠO RIÊNG SUMMARY "2025 (FULL YEAR)" CHO MATRIX ---
-                df_matrix_coil = df_coil.copy()
-                df_25_coils = df_matrix_coil[df_matrix_coil['Time_Group'].str.contains('2025')].copy()
-                if not df_25_coils.empty:
-                    df_25_coils['Time_Group'] = '2025 (Full Year)'
-                    df_matrix_coil = pd.concat([df_matrix_coil, df_25_coils], ignore_index=True)
-
-                df_matrix_t6 = df_t6.copy()
-                df_25_t6 = df_matrix_t6[df_matrix_t6['Time_Group'].str.contains('2025')].copy()
-                if not df_25_t6.empty:
-                    df_25_t6['Time_Group'] = '2025 (Full Year)'
-                    df_matrix_t6 = pd.concat([df_matrix_t6, df_25_t6], ignore_index=True)
-
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'), 
                     'Total_Scrap': (SCRAP_COL, 'sum'), 
                     'Total_Coils': (COIL_ID_COL, 'count') 
                 }
                 
-                # Tính toán thân Matrix dựa trên df_matrix_coil (có chứa 2025 Full Year)
-                matrix_data = df_matrix_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                # Calculate matrix body directly using df_coil and df_t6 (purely month-by-month)
+                matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
                 
                 if available_grades:
-                    grade_data = df_matrix_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
+                    grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
                     matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
-
+                
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
+                # Simplified sort: Prioritizes YYYY-MM format chronological order
                 def custom_time_sort(period_str):
                     p = str(period_str)
                     year = p[:4]
-                    if "Full Year" in p:
-                        group = "3_FullYear"
-                    elif any(q in p for q in ["H1", "H2", "Q1", "Q2", "Q3", "Q4"]):
+                    if len(p) >= 7 and "-" in p[4:8]: # Matches YYYY-MM format
                         group = f"1_{p}"
-                    elif len(p) >= 7 and "-" in p[4:8]:
-                        group = f"2_{p}"
                     else:
-                        group = f"4_{p}"
+                        group = f"2_{p}"
                     return f"{year}_{group}"
-
+                
                 prod_periods = sorted(matrix_data['Time_Group'].unique(), key=custom_time_sort)
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
-
-                # Cột Total Output (Bên phải cùng): Vẫn dùng df_matrix_coil để hiện dòng tổng 2025
-                prod_summary = df_matrix_coil.groupby('Time_Group').agg({
+                
+                # Total Output Column (Far Right): Uses df_coil directly
+                prod_summary = df_coil.groupby('Time_Group').agg({
                     LEN_COL: 'sum',
-                    WT_COL: 'sum' if WT_COL in df_matrix_coil.columns else lambda x: 0
+                    WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
                 }).to_dict('index')
                 
-                # Cột Total Usage (Dưới cùng) & Grand Total: Phải dùng df_coil (KHÔNG chứa summary) để tránh X2 dữ liệu
+                # Total Usage Row (Bottom) & Grand Total
                 usage_summary = df_coil.groupby('Usage_Month').agg({
                     LEN_COL: 'sum',
                     WT_COL: 'sum' if WT_COL in df_coil.columns else lambda x: 0
                 }).to_dict('index')
-
+                
                 total_matrix_L = df_coil[LEN_COL].sum()
                 total_matrix_W = df_coil[WT_COL].sum() if WT_COL in df_coil.columns else 0
-
+                
                 def get_color(rate):
                     if pd.isna(rate): return "#ffffff" 
                     if rate < 2.0: return "#e8f5e9" 
                     if rate < 5.0: return "#fff3e0" 
                     if rate < 10.0: return "#ffcdd2" 
                     return "#e57373" 
-
+                
                 matrix_dict = matrix_data.set_index(['Time_Group', 'Usage_Month']).to_dict('index')
-
+                
                 html_parts = [
                     "<style>",
                     ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
@@ -1887,7 +1871,7 @@ if uploaded_file is not None:
                 html_parts.extend([f"<th>{m}</th>" for m in usage_months])
                 html_parts.append("<th class='summary-header'>Total Output<br>(生產總量)</th>")
                 html_parts.append("</tr></thead><tbody>")
-
+                
                 for prod in prod_periods:
                     html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
                     for usage in usage_months:
@@ -1903,7 +1887,7 @@ if uploaded_file is not None:
                             cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
                             
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
-
+                
                             if cell_total_grade > 0 and available_grades:
                                 for g in available_grades:
                                     g_pct = (row.get(g, 0) / cell_total_grade * 100)
@@ -1917,7 +1901,7 @@ if uploaded_file is not None:
                     p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
                     html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} kg</td>")
                     html_parts.append("</tr>")
-
+                
                 html_parts.append("<tr><th class='summary-header'>Total Usage<br>(客戶使用量)</th>")
                 for usage in usage_months:
                     u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
@@ -1927,7 +1911,7 @@ if uploaded_file is not None:
                 html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td>")
                 html_parts.append("</tr>")
                 html_parts.append("</tbody></table>")
-
+                
                 matrix_html_str = "".join(html_parts)
                 
                 capture_component = f"""
@@ -1978,7 +1962,7 @@ if uploaded_file is not None:
                     from docx.oxml import parse_xml
                     from docx.enum.text import WD_ALIGN_PARAGRAPH
                     from docx.enum.table import WD_ALIGN_VERTICAL
-
+                
                     doc = Document()
                     
                     section = doc.sections[0]
@@ -1987,14 +1971,14 @@ if uploaded_file is not None:
                     section.page_height = new_height
                     section.left_margin = Inches(0.5)
                     section.right_margin = Inches(0.5)
-
+                
                     doc.add_heading('Production vs Usage Quality Matrix', level=1)
                     
                     def set_cell_background(cell, hex_color):
                         hex_color = hex_color.replace("#", "")
                         shading_elm = parse_xml(r'<w:shd {} w:fill="{}"/>'.format(nsdecls('w'), hex_color))
                         cell._tc.get_or_add_tcPr().append(shading_elm)
-
+                
                     cols_count = len(usage_months) + 2
                     table = doc.add_table(rows=1, cols=cols_count)
                     table.style = 'Table Grid'
@@ -2015,11 +1999,11 @@ if uploaded_file is not None:
                     set_cell_background(hdr_cells[-1], "1565c0")
                     hdr_cells[-1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
                     hdr_cells[-1].paragraphs[0].runs[0].font.bold = True
-
+                
                     for cell in hdr_cells:
                         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-
+                
                     for prod in prod_periods:
                         row_cells = table.add_row().cells
                         
@@ -2067,7 +2051,7 @@ if uploaded_file is not None:
                                                 run_pct.font.color.rgb = RGBColor(0, 128, 0)
                                             else:
                                                 run_pct.font.color.rgb = RGBColor(220, 20, 60)
-                                                
+                                
                         p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
                         p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
                         cell_out = row_cells[-1]
@@ -2079,7 +2063,7 @@ if uploaded_file is not None:
                         run_out.font.size = Pt(8)
                         run_out.font.color.rgb = RGBColor(13, 71, 161)
                         run_out.font.bold = True
-
+                
                     row_cells = table.add_row().cells
                     row_cells[0].text = "Total Usage\n(客戶使用量)"
                     set_cell_background(row_cells[0], "1565c0")
@@ -2110,7 +2094,7 @@ if uploaded_file is not None:
                     run_grand.font.size = Pt(9)
                     run_grand.font.color.rgb = RGBColor(183, 28, 28)
                     run_grand.font.bold = True
-
+                
                     word_buffer = io.BytesIO()
                     doc.save(word_buffer)
                     word_buffer.seek(0)
