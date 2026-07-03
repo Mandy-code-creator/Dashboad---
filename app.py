@@ -1610,6 +1610,15 @@ if uploaded_file is not None:
         possible_wt_cols = ['重量', 'Weight', 'WT', 'Net_Weight', 'Net Weight']
         WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
 
+        # --- APPLIED FIX: OVERWRITE PRODUCTION TIIME_GROUP TO MONTHLY FORMAT (YYYY-MM) ---
+        # Automatically detect the original production date column to override the quarterly group
+        possible_prod_date_cols = ['生產日期', 'Production Date', 'Date', '製造日期', 'Prod_Date']
+        PROD_DATE_COL = next((c for c in possible_prod_date_cols if c in df.columns), None)
+        
+        if PROD_DATE_COL:
+            df['Time_Group'] = pd.to_datetime(df[PROD_DATE_COL], errors='coerce').dt.strftime('%Y-%m')
+        # ---------------------------------------------------------------------------------
+
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
             # --- FIX: Remove virtual 2025 (Full Year) row from raw data for accurate coil aggregation ---
             df_t6_raw = df[df['Time_Group'] != "2025 (Full Year)"].copy()
@@ -1628,7 +1637,6 @@ if uploaded_file is not None:
 
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
-            # --- APPLIED FIX: Enforce strict YYYY-MM formatting for all usage dates ---
             def format_usage_group(d):
                 return d.strftime('%Y-%m') 
             
