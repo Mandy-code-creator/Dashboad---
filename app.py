@@ -1330,12 +1330,100 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # Production vs Usage Quality Matrix (Clean Monthly Blocks)
+                # Production vs Usage Quality Matrix
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
+                
                 available_grades = [g for g in base_grades if g in df_coil.columns] if 'base_grades' in globals() else []
                 
-                agg_dict = {'Total_Length': (LEN_COL, 'sum'), 'Total_Scrap': (SCRAP_COL, 'sum'), 'Total_Coils': (COIL_ID_COL, 'count')}
-                matrix_data = df_coil.groupby(['Usage_Month', 'Time_Group']).agg(**agg_dict).reset_index()
+                # Matrix production row logic:
+                # 2024 = one annual row
+                # 2025 onward = monthly rows
+                df_matrix = df_coil.copy()
+                
+                df_matrix["Production_Group"] = np.where(
+                    df_matrix["Production_Date"].dt.year == 2024,
+                    "2024 (Full Year)",
+                    df_matrix["Production_Date"].dt.strftime("%Y-%m")
+                )
+                
+                agg_dict = {
+                    'Total_Length': (LEN_COL, 'sum'),
+                    'Total_Scrap': (SCRAP_COL, 'sum'),
+                    'Total_Coils': (COIL_ID_COL, 'count')
+                }
+                
+                matrix_data = (
+                    df_matrix
+                    .groupby(['Usage_Month', 'Production_Group'])
+                    .agg(**agg_dict)
+                    .reset_index()
+                )
+                
+                if available_grades:
+                    df_grade_matrix = df_t6.copy()
+                
+                    df_grade_matrix["Production_Group"] = np.where(
+                        df_grade_matrix["Production_Date"].dt.year == 2024,
+                        "2024 (Full Year)",
+                        df_grade_matrix["Production_Date"].dt.strftime("%Y-%m")
+                    )
+                
+                    grade_data = (
+                        df_grade_matrix
+                        .groupby(['Usage_Month', 'Production_Group'])[available_grades]
+                        .sum()
+                        .reset_index()
+                    )
+                
+                    matrix_data = pd.merge(
+                        matrix_data,
+                        grade_data,
+                        on=['Usage_Month', 'Production_Group'],
+                        how='left'
+                    )
+                
+                matrix_data['Scrap_Rate'] = np.where(
+                    matrix_data['Total_Length'] > 0,
+                    matrix_data['Total_Scrap'] / matrix_data['Total_Length'] * 100,
+                    0
+                ).round(2)
+                
+                prod_periods = sorted(
+                    matrix_data['Production_Group'].unique(),
+                    key=lambda x: "2024-00" if x == "2024 (Full Year)" else x
+                )
+                
+                usage_months = sorted(matrix_data['Usage_Month'].unique())
+                
+                prod_summary = (
+                    df_matrix
+                    .groupby('Production_Group')
+                    .agg({
+                        LEN_COL: 'sum',
+                        WT_COL: 'sum' if WT_COL in df_matrix.columns else lambda x: 0
+                    })
+                    .to_dict('index')
+                )
+                
+                usage_summary = (
+                    df_matrix
+                    .groupby('Usage_Month')
+                    .agg({
+                        LEN_COL: 'sum',
+                        WT_COL: 'sum' if WT_COL in df_matrix.columns else lambda x: 0
+                    })
+                    .to_dict('index')
+                )
+                
+                total_matrix_L = df_matrix[LEN_COL].sum()
+                total_matrix_W = df_matrix[WT_COL].sum() if WT_COL in df_matrix.columns else 0
+                
+                matrix_dict = (
+                    matrix_data
+                    .set_index(['Production_Group', 'Usage_Month'])
+                    .to_dict('index')
+                )
                 
                 if available_grades:
                     grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
