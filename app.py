@@ -1210,17 +1210,54 @@ if uploaded_file is not None:
                 return d.strftime('%Y-%m') 
             
             df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
-            df_sorted = df_t6.sort_values('Usage_Date')
-            
-            # Coils aggregation mapping logic (keep first Month)
-            df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
-            df_first = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first')
-            df_coil[LEN_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[LEN_COL].to_dict())
-            
-            if WT_COL in df_t6.columns:
-                df_coil[WT_COL] = df_coil[COIL_ID_COL].map(df_first.set_index(COIL_ID_COL)[WT_COL].to_dict())
-                
-            df_coil[SCRAP_COL] = df_coil[COIL_ID_COL].map(df_sorted.groupby(COIL_ID_COL)[SCRAP_COL].sum().to_dict())
+
+            # ==========================================================
+            # COIL MASTER TABLE — one physical coil counted once
+            # Length / Weight: use one value per 鋼捲號碼 (max avoids blank/0 duplicates)
+            # Scrap: sum all repeated records of the same coil
+            # Usage month: assign to the earliest recorded usage date
+            # ==========================================================
+            df_sorted = df_t6.copy()
+            df_sorted[COIL_ID_COL] = (
+                df_sorted[COIL_ID_COL]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+                .str.replace(r"\.0$", "", regex=True)
+                .replace({"": np.nan, "NAN": np.nan, "NONE": np.nan, "NULL": np.nan})
+            )
+            df_sorted = df_sorted.dropna(subset=[COIL_ID_COL]).copy()
+
+            df_sorted[LEN_COL] = pd.to_numeric(df_sorted[LEN_COL], errors='coerce').fillna(0)
+            df_sorted[SCRAP_COL] = pd.to_numeric(df_sorted[SCRAP_COL], errors='coerce').fillna(0)
+            if WT_COL in df_sorted.columns:
+                df_sorted[WT_COL] = pd.to_numeric(df_sorted[WT_COL], errors='coerce').fillna(0)
+            else:
+                df_sorted[WT_COL] = 0
+
+            # First usage record holds the coil's production/usage attributes.
+            df_sorted = df_sorted.sort_values([COIL_ID_COL, 'Usage_Date', 'Production_Date'])
+            df_coil_base = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
+
+            # Physical coil values are aggregated once per coil.
+            coil_master = (
+                df_sorted.groupby(COIL_ID_COL, as_index=False)
+                .agg(
+                    Coil_Length=(LEN_COL, 'max'),
+                    Coil_Weight=(WT_COL, 'max'),
+                    Coil_Total_Scrap=(SCRAP_COL, 'sum')
+                )
+            )
+
+            df_coil = (
+                df_coil_base
+                .drop(columns=[LEN_COL, WT_COL, SCRAP_COL], errors='ignore')
+                .merge(coil_master, on=COIL_ID_COL, how='left')
+            )
+            df_coil[LEN_COL] = df_coil['Coil_Length'].fillna(0)
+            df_coil[WT_COL] = df_coil['Coil_Weight'].fillna(0)
+            df_coil[SCRAP_COL] = df_coil['Coil_Total_Scrap'].fillna(0)
+            df_coil = df_coil.drop(columns=['Coil_Length', 'Coil_Weight', 'Coil_Total_Scrap'])
 
             # =========================================================================
             # 🔍 METHOD 3: MISSING COILS FINDER & TRACER BULLET (DEBUGGING)
@@ -1329,105 +1366,106 @@ if uploaded_file is not None:
                 st.markdown("<div style='text-align: center; color: #c00000; font-weight: bold; font-size: 14px; margin-bottom: 20px;'>Logic: If Scrap increases but YS/TS/EL/YPE is stable ➡️ Issue is with the Customer's Machine.</div>", unsafe_allow_html=True)
                 st.markdown("---")
                 
-                # Production vs Usage Quality Matrix (Clean Monthly Blocks)
+                # ==========================================================
                 # Production vs Usage Quality Matrix
+                # 2024 production is shown as one annual row;
+                # 2025 onward is shown by production month.
+                # Source is df_coil, so length / weight / coil count are never duplicated.
+                # ==========================================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
-                
-                available_grades = [g for g in base_grades if g in df_coil.columns]
-                
-                # ----------------------------------------------------------
-                # Matrix grouping rule:
-                # 2024 = combine as one full-year production row
-                # 2025 onward = keep monthly production rows
-                # ----------------------------------------------------------
+
                 df_matrix = df_coil.copy()
-                df_grade_matrix = df_t6.copy()
-                
-                for temp_df in [df_matrix, df_grade_matrix]:
-                    temp_df["Production_Group"] = np.where(
-                        temp_df["Production_Date"].dt.year == 2024,
-                        "2024 (Full Year)",
-                        temp_df["Production_Date"].dt.strftime("%Y-%m")
-                    )
-                
-                # Main matrix: coil count, input length, total scrap
+                df_matrix['Production_Group'] = np.where(
+                    df_matrix['Production_Date'].dt.year == 2024,
+                    '2024 (Full Year)',
+                    df_matrix['Production_Date'].dt.strftime('%Y-%m')
+                )
+
+                # Aggregate all matrix information from the one-coil-one-row source.
                 agg_dict = {
-                    "Total_Length": (LEN_COL, "sum"),
-                    "Total_Scrap": (SCRAP_COL, "sum"),
-                    "Total_Coils": (COIL_ID_COL, "count")
+                    'Total_Length': (LEN_COL, 'sum'),
+                    'Total_Scrap': (SCRAP_COL, 'sum'),
+                    'Total_Coils': (COIL_ID_COL, 'nunique')
                 }
-                
+                for grade in base_grades:
+                    if grade in df_matrix.columns:
+                        agg_dict[grade] = (grade, 'sum')
+
                 matrix_data = (
                     df_matrix
-                    .groupby(["Usage_Month", "Production_Group"])
+                    .groupby(['Usage_Month', 'Production_Group'], as_index=False)
                     .agg(**agg_dict)
-                    .reset_index()
                 )
-                
-                # Grade distribution must use the SAME Production_Group logic
-                if available_grades:
-                    grade_data = (
-                        df_grade_matrix
-                        .groupby(["Usage_Month", "Production_Group"])[available_grades]
-                        .sum()
-                        .reset_index()
-                    )
-                
-                    matrix_data = pd.merge(
-                        matrix_data,
-                        grade_data,
-                        on=["Usage_Month", "Production_Group"],
-                        how="left"
-                    )
-                
-                # Scrap rate
-                matrix_data["Scrap_Rate"] = np.where(
-                    matrix_data["Total_Length"] > 0,
-                    matrix_data["Total_Scrap"] / matrix_data["Total_Length"] * 100,
+
+                matrix_data['Scrap_Rate'] = np.where(
+                    matrix_data['Total_Length'] > 0,
+                    matrix_data['Total_Scrap'] / matrix_data['Total_Length'] * 100,
                     0
                 ).round(2)
-                
-                # Order of production rows
+
                 prod_periods = sorted(
-                    matrix_data["Production_Group"].unique(),
-                    key=lambda x: "2024-00" if x == "2024 (Full Year)" else x
+                    matrix_data['Production_Group'].unique(),
+                    key=lambda x: '2024-00' if x == '2024 (Full Year)' else x
                 )
-                
-                usage_months = sorted(matrix_data["Usage_Month"].unique())
-                
-                # Production total summary at right side of Matrix
+                usage_months = sorted(matrix_data['Usage_Month'].unique())
+
+                # Right-side summary: one physical coil contributes length / weight once only.
                 prod_summary = (
-                    df_matrix
-                    .groupby("Production_Group")
-                    .agg({
-                        LEN_COL: "sum",
-                        WT_COL: "sum" if WT_COL in df_matrix.columns else lambda x: 0
+                    df_matrix.groupby('Production_Group')
+                    .agg(**{
+                        LEN_COL: (LEN_COL, 'sum'),
+                        WT_COL: (WT_COL, 'sum')
                     })
-                    .to_dict("index")
+                    .to_dict('index')
                 )
-                
-                # Usage total summary
                 usage_summary = (
-                    df_matrix
-                    .groupby("Usage_Month")
-                    .agg({
-                        LEN_COL: "sum",
-                        WT_COL: "sum" if WT_COL in df_matrix.columns else lambda x: 0
+                    df_matrix.groupby('Usage_Month')
+                    .agg(**{
+                        LEN_COL: (LEN_COL, 'sum'),
+                        WT_COL: (WT_COL, 'sum')
                     })
-                    .to_dict("index")
+                    .to_dict('index')
                 )
-                
+
                 total_matrix_L = df_matrix[LEN_COL].sum()
-                total_matrix_W = df_matrix[WT_COL].sum() if WT_COL in df_matrix.columns else 0
-                
-                # Cell lookup dictionary
+                total_matrix_W = df_matrix[WT_COL].sum()
+
+                # Optional audit table: lets you manually confirm the monthly denominator.
+                with st.expander('🔎 Matrix Length / Weight Audit', expanded=False):
+                    audit_summary = (
+                        df_matrix.groupby('Usage_Month', as_index=False)
+                        .agg(
+                            Unique_Coils=(COIL_ID_COL, 'nunique'),
+                            Total_Length_m=(LEN_COL, 'sum'),
+                            Total_Weight_kg=(WT_COL, 'sum')
+                        )
+                        .sort_values('Usage_Month')
+                    )
+                    st.dataframe(audit_summary, use_container_width=True, hide_index=True)
+
+                    audit_month = st.selectbox(
+                        'Select Usage Month for coil-level check:',
+                        sorted(df_matrix['Usage_Month'].unique()),
+                        key='matrix_audit_month'
+                    )
+                    audit_detail = (
+                        df_matrix[df_matrix['Usage_Month'] == audit_month]
+                        [[COIL_ID_COL, 'Production_Date', 'Usage_Date', LEN_COL, WT_COL, SCRAP_COL]]
+                        .sort_values(COIL_ID_COL)
+                    )
+                    st.dataframe(audit_detail, use_container_width=True, hide_index=True)
+                    st.caption(
+                        f'{audit_month} — Total length: {audit_detail[LEN_COL].sum():,.0f} m | '
+                        f'Total weight: {audit_detail[WT_COL].sum():,.0f} kg'
+                    )
+
                 matrix_dict = (
                     matrix_data
-                    .set_index(["Production_Group", "Usage_Month"])
-                    .to_dict("index")
+                    .set_index(['Production_Group', 'Usage_Month'])
+                    .to_dict('index')
                 )
-                
+
                 html_parts = [
                     "<style>",
                     ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
