@@ -1465,7 +1465,7 @@ if uploaded_file is not None:
                     .set_index(['Production_Group', 'Usage_Month'])
                     .to_dict('index')
                 )
-
+                matrix_grade_cols = [g for g in base_grades if g in matrix_data.columns]
                 html_parts = [
                     "<style>",
                     ".q-matrix { width: 100%; border-collapse: collapse; font-family: sans-serif; font-size: 12px; }",
@@ -1494,11 +1494,11 @@ if uploaded_file is not None:
                             bg_color = get_color(scrap_rate)
                             grade_html = []
                             total_coils = row.get('Total_Coils', 0)
-                            cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
+                            cell_total_grade = sum(row.get(g, 0) for g in matrix_grade_cols) if matrix_grade_cols else 0
                             cell_title_html = f"<div class='cell-title'>Scrap: {scrap_rate:.1f}%<br><span style='font-size: 11px; color: #555;'>Coils: {int(total_coils)}</span></div>"
                 
-                            if cell_total_grade > 0 and available_grades:
-                                for g in available_grades:
+                            if cell_total_grade > 0 and matrix_grade_cols:
+                               for g in matrix_grade_cols:
                                     g_pct = (row.get(g, 0) / cell_total_grade * 100)
                                     if g_pct > 0:
                                         color = "green" if "A" in g else "red"
