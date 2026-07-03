@@ -1555,6 +1555,7 @@ if uploaded_file is not None:
                 
                 st.markdown("### 📄 Download Production Matrix Report")
                 def create_word_report():
+                    matrix_grade_cols = [g for g in base_grades if g in matrix_data.columns]
                     from docx import Document
                     from docx.shared import Inches, Pt, RGBColor
                     from docx.oxml.ns import nsdecls
@@ -1626,9 +1627,11 @@ if uploaded_file is not None:
                                 run_scrap.font.bold = True
                                 run_scrap.font.size = Pt(9)
                                 
-                                cell_total_grade = sum(row.get(g, 0) for g in available_grades) if available_grades else 0
-                                if cell_total_grade > 0 and available_grades:
-                                    for g in available_grades:
+                                cell_total_grade = sum(
+                                    row.get(g, 0) for g in matrix_grade_cols
+                                ) if matrix_grade_cols else 0
+                                if cell_total_grade > 0 and matrix_grade_cols:
+                                   for g in matrix_grade_cols:
                                         g_pct = (row.get(g, 0) / cell_total_grade * 100)
                                         if g_pct > 0:
                                             p.add_run(f"{g}: ")
