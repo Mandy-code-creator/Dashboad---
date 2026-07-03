@@ -178,12 +178,22 @@ if uploaded_file is not None:
     sns.set_theme(style="whitegrid")
     solid_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
 
+    # --- GLOBAL HELPER & SORTING FUNCTIONS ---
     def get_sort_key(x):
         if "2024 (Full Year)" in x: return "2024-00"
         if "2025 H1" in x: return "2025-00a"
         if "2025 Q3" in x: return "2025-00b"
         if "2025 (Full Year)" in x: return "2025-99" 
         return x
+
+    def custom_time_sort(period_str):
+        p = str(period_str)
+        year = p[:4]
+        if len(p) >= 7 and "-" in p[4:8]: # Matches YYYY-MM format
+            group = f"1_{p}"
+        else:
+            group = f"2_{p}"
+        return f"{year}_{group}"
 
     def add_chart_border(ax):
         for spine in ax.spines.values():
