@@ -10,7 +10,8 @@ from PIL import Image
 from docx import Document
 from docx.shared import Inches
 import tempfile
-# --- FIX: Tắt giới hạn pixel để tránh lỗi DecompressionBombError ---
+
+# --- FIX: Disable pixel limit to prevent DecompressionBombError ---
 Image.MAX_IMAGE_PIXELS = None
 
 # --- PAGE CONFIG ---
@@ -18,7 +19,7 @@ st.set_page_config(page_title="Quality & Scrap Dashboard", layout="wide")
 st.title("📊 Production Quality Yield & Tail Scrap Analysis")
 st.markdown("---")
 
-# --- FIX: Tối ưu DPI cho Web để tiết kiệm RAM (vẫn giữ 300 DPI cho tải xuống) ---
+# --- FIX: Optimize DPI for Web to save RAM (keep 300 DPI for downloads) ---
 plt.rcParams['figure.dpi'] = 120
 plt.rcParams['savefig.dpi'] = 300
 plt.rcParams['savefig.bbox'] = 'tight'
@@ -53,18 +54,14 @@ if uploaded_file is not None:
         d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
         
+        # --- APPLIED FIX: Removed the H1/Q3 forcing logic. Returns pure YYYY-MM ---
         def categorize_period(d):
             if pd.isnull(d): return "Unknown"
             y = d.year
-            q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
             
-            if y == 2024: return "2024 (Full Year)"
-            if y == 2025:
-                if d < q3_s: return "2025 H1 (Until 06/28)"
-                if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
-                return d.strftime('%Y-%m')
-            if y >= 2026: return d.strftime('%Y-%m')
-            return "Other"
+            if y <= 2024: return "2024 (Full Year)"
+            # Everything from 2025 onwards defaults to monthly YYYY-MM
+            return d.strftime('%Y-%m')
             
         df['Time_Group'] = df['Production_Date'].apply(categorize_period)
         df = df[df['Time_Group'] != "Other"]
@@ -137,6 +134,7 @@ if uploaded_file is not None:
     for f in mech_features:
         if f in df.columns:
             df[f] = pd.to_numeric(df[f], errors='coerce')
+            
     # --- COATING THICKNESS: Average of N / C / S ---
     COATING_THICKNESS_COLS = ['塗層膜厚N', '塗層膜厚C', '塗層膜厚S']
     available_coating_cols = [c for c in COATING_THICKNESS_COLS if c in df.columns]
@@ -148,6 +146,7 @@ if uploaded_file is not None:
         df['Coating_Thickness_Avg'] = df[available_coating_cols].mean(axis=1)
     else:
         df['Coating_Thickness_Avg'] = np.nan
+        
     # --- Estimated coating group based on actual average thickness ---
     df['Coating_Group'] = np.select(
         [
@@ -176,8 +175,6 @@ if uploaded_file is not None:
 
     def get_sort_key(x):
         if "2024 (Full Year)" in x: return "2024-00"
-        if "2025 H1" in x: return "2025-00a"
-        if "2025 Q3" in x: return "2025-00b"
         if "2025 (Full Year)" in x: return "2025-99" 
         return x
 
@@ -189,7 +186,7 @@ if uploaded_file is not None:
 
     # --- SPC & CAPABILITY HELPER FUNCTIONS ---
     def is_valid_for_control(period_label):
-        if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
+        if "2024" in period_label or "2025 (Full Year)" in period_label:
             return False
         return True
 
@@ -361,7 +358,6 @@ if uploaded_file is not None:
 
             if v_l:
                 if feat == 'Coating_Thickness_Avg':
-                    # Chỉ áp dụng riêng cho Coating Thickness
                     coating_min = 40.0
                     coating_max = 47.0
                     coating_bins = np.arange(
@@ -380,12 +376,10 @@ if uploaded_file is not None:
                         alpha=0.7
                     )
         
-                    # Chỉ set trục X riêng cho coating
                     ax.set_xlim(coating_min, coating_max)
                     ax.set_xticks(np.arange(40.0, 47.1, 0.5))
         
                 else:
-                    # Giữ nguyên histogram cũ cho YS / TS / EL / YPE
                     ax.hist(
                         v_l,
                         bins=np.linspace(fmin, fmax, 16),
@@ -504,7 +498,6 @@ if uploaded_file is not None:
                 fontsize=7
             )
         
-            # Coating đã set_xlim riêng ở phía trên
             if feat != 'Coating_Thickness_Avg':
                 ax.set_xlim(fmin, fmax)
         
@@ -546,14 +539,13 @@ if uploaded_file is not None:
 
     # ==========================================================
     # TASK 2: YIELD SUMMARY
-    
     # ==========================================================
     with tab2:
         st.header("2. Executive Quality Yield Summary")
         
         st.subheader("Detailed Yield by Thickness & Material")
         
-        # BƯỚC 1: Chỉ lấy các cột chắc chắn tồn tại trong dữ liệu
+        # STEP 1: Select only existing columns in data
         yield_summary = df.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material'])[
             ['Total_Qty', 'Acceptable_Qty', 'Severe_Bad_Qty']
         ].sum().reset_index()
@@ -564,13 +556,13 @@ if uploaded_file is not None:
             yield_summary['Yield (%)'] = (yield_summary['Acceptable_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             yield_summary['Defect_Rate (%)'] = (yield_summary['Severe_Bad_Qty'] / yield_summary['Total_Qty'] * 100).round(2)
             
-            # BƯỚC 2: Tính toán Tỉ lệ Scrap gián tiếp (Scrap = Tổng - Đạt)
+            # STEP 2: Calculate indirect Scrap Rate (Scrap = Total - Acceptable)
             yield_summary['Scrap_Rate (%)'] = ((yield_summary['Total_Qty'] - yield_summary['Acceptable_Qty']) / yield_summary['Total_Qty'] * 100).round(2)
             
             yield_summary['_sort'] = yield_summary['Time_Group'].apply(get_sort_key)
             yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
 
-            # BƯỚC 3: Cập nhật hiển thị bảng dữ liệu (đã bỏ Scrap_Qty khỏi phần format)
+            # STEP 3: Update data table display
             st.dataframe(
                 yield_summary.style
                     .background_gradient(subset=['Yield (%)'], cmap='Greens')
@@ -590,7 +582,7 @@ if uploaded_file is not None:
         st.subheader("📊 Grade Distribution & Scrap by Time Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
-        # 1. Tính toán phân bố Grade
+        # 1. Calculate Grade distribution
         grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
         grade_dist['Total'] = grade_dist.sum(axis=1)
         
@@ -598,7 +590,7 @@ if uploaded_file is not None:
         for g in base_grades:
             grade_dist_display[g] = (grade_dist[g] / grade_dist['Total'].replace(0, np.nan) * 100).fillna(0).round(1)
             
-        # 2. TÍNH TỈ LỆ SCRAP THEO ĐÚNG LOGIC TỪ TAB 5
+        # 2. CALCULATE SCRAP RATE USING TAB 5 LOGIC
         COIL_ID_COL = '鋼捲號碼'
         if LEN_COL in df.columns and SCRAP_COL in df.columns and COIL_ID_COL in df.columns:
             df_temp = df.copy()
@@ -610,7 +602,7 @@ if uploaded_file is not None:
 
             scrap_totals = df_temp.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
             
-            # Xử lý drop_duplicates an toàn
+            # Safe drop_duplicates handling
             sort_cols = ['Time_Group', 'Production_Date'] if 'Production_Date' in df_temp.columns else ['Time_Group']
             first_occurrence = df_temp.sort_values(sort_cols).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
             
@@ -623,25 +615,25 @@ if uploaded_file is not None:
                 Total_Scrap=(SCRAP_COL, 'sum')
             )
             
-            # Tính tỉ lệ % (Làm tròn 2 chữ số thập phân để ra được 10.41%)
+            # Calculate percentage (Round to 2 decimal places)
             scrap_by_period_temp['Scrap_Rate'] = np.where(
                 scrap_by_period_temp['Total_Length'] > 0,
                 (scrap_by_period_temp['Total_Scrap'] / scrap_by_period_temp['Total_Length'] * 100),
                 0
             ).round(2)
             
-            # Gắn vào bảng hiển thị chính
+            # Attach to main display table
             grade_dist_display = grade_dist_display.join(scrap_by_period_temp['Scrap_Rate'])
         else:
             grade_dist_display['Scrap_Rate'] = 0.0
             
         grade_dist_display['Scrap_Rate'] = grade_dist_display['Scrap_Rate'].fillna(0)
         
-        # 3. Sắp xếp dữ liệu
+        # 3. Sort data
         grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
         grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'])
         
-        # 4. Chuyển đổi định dạng thêm dấu '%'
+        # 4. Format to add '%' sign
         grade_dist_pct_str = grade_dist_display.copy()
         for col in grade_dist_display.columns:
             if col == 'Scrap_Rate':
@@ -649,7 +641,7 @@ if uploaded_file is not None:
             else:
                 grade_dist_pct_str[col] = grade_dist_display[col].map(lambda x: f"{x:.1f}%")
 
-        # 5. Tạo HTML hiển thị bảng
+        # 5. Generate HTML for table display
         header_color = "#1a3a5c"
         alt_row_color = "#dce6f1"
         html = f"""
@@ -689,23 +681,23 @@ if uploaded_file is not None:
             
         html += "</tbody></table>"
         st.markdown(html, unsafe_allow_html=True)
-        # --- CODE THÊM NÚT TẢI BẢNG DỮ LIỆU ---
-        # Tạo bản sao của bảng dữ liệu đang hiển thị và đặt tên cho cột thời gian
+        
+        # --- ADD DOWNLOAD DATA TABLE BUTTON ---
+        # Create a copy of the displayed data table and name the time column
         export_df = grade_dist_pct_str.copy()
         export_df.index.name = "Time Period"
 
-        # Chuyển đổi dữ liệu sang định dạng CSV (dùng utf-8-sig để không bị lỗi font chữ)
+        # Convert data to CSV format (using utf-8-sig to prevent font issues)
         csv_data = export_df.to_csv(index=True).encode('utf-8-sig')
 
-        # Tạo nút Download
+        # Create Download button
         st.download_button(
-            label="📥 Tải bảng dữ liệu này (CSV)",
+            label="📥 Download Data Table (CSV)",
             data=csv_data,
             file_name="grade_distribution_and_scrap.csv",
             mime="text/csv",
             key="dl_grade_scrap"
         )
-    # ==========================================================
     # ==========================================================
     # TASK 3: DISTRIBUTION & PROCESS CAPABILITY (SPC)
     # ==========================================================
@@ -717,7 +709,6 @@ if uploaded_file is not None:
             "Limit calculations strictly based on grades A or B (A-B+, A-B)."
         )
     
-        # Giữ nguyên các chỉ tiêu cũ, chỉ bổ sung độ dày lớp phủ trung bình
         spc_features = ['YS', 'TS', 'EL', 'YPE', 'Coating_Thickness_Avg']
     
         ordered_periods = sorted(df['Time_Group'].unique(), key=get_sort_key)
@@ -747,7 +738,6 @@ if uploaded_file is not None:
         if cap_summary_rows:
             cap_df = pd.DataFrame(cap_summary_rows)
     
-            # Đổi tên hiển thị để bảng dễ hiểu hơn
             cap_df['Feature'] = cap_df['Feature'].replace({
                 'Coating_Thickness_Avg': 'Coating Thickness Avg'
             })
@@ -890,7 +880,6 @@ if uploaded_file is not None:
             st.markdown("---")
 
     # ==========================================================
-    # ==========================================================
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
     # ==========================================================
     with tab4:
@@ -941,9 +930,6 @@ if uploaded_file is not None:
                 if t4_feat not in plot_df_base.columns:
                     continue
     
-                # --------------------------------------------------
-                # Coating Thickness: tách riêng 25 min và 40 min
-                # --------------------------------------------------
                 if t4_feat == 'Coating_Thickness_Avg':
                     group_datasets = []
     
@@ -956,7 +942,6 @@ if uploaded_file is not None:
                             group_datasets.append((coating_group, group_df))
     
                 else:
-                    # Cơ tính vẫn giữ logic cũ: không tách theo coating group
                     group_datasets = [('All Coating Groups', plot_df_base.copy())]
     
                 for coating_group_name, feature_base_df in group_datasets:
@@ -987,7 +972,6 @@ if uploaded_file is not None:
     
                     vals_all = plot_df[t4_feat].values
     
-                    # Coating không dùng chung spec của YS/TS/EL/YPE
                     cap_thickness = (
                         t4_thick
                         if t4_feat != 'Coating_Thickness_Avg'
@@ -1063,7 +1047,6 @@ if uploaded_file is not None:
                     # SPEC LIMITS
                     # ==================================================
                     if t4_feat == 'Coating_Thickness_Avg':
-                        # Estimated coating group: only show lower specification limit
                         if coating_group_name == '25 min (Estimated)':
                             lsl = 25.0
                         elif coating_group_name == '40 min (Estimated)':
@@ -1075,7 +1058,6 @@ if uploaded_file is not None:
                         tgt = None
                     
                     else:
-                        # Keep original mechanical-property specification logic
                         spec = (
                             GLOBAL_SPECS.get(t4_thick, {}).get(t4_feat, {})
                             if t4_thick != 'Overall'
@@ -1236,13 +1218,11 @@ if uploaded_file is not None:
                     add_chart_border(ax_mr)
     
                     # --------------------------------------------------
-                    # --------------------------------------------------
                     # X-axis: monthly labels and month separators
                     # --------------------------------------------------
                     month_labels = plot_df['Production_Date'].dt.strftime('%Y-%m')
                     month_start_idx = np.where(month_labels.ne(month_labels.shift()))[0]
                     
-                    # Nhãn tháng chỉ đặt ở MR chart
                     ax_mr.set_xticks(month_start_idx)
                     ax_mr.set_xticklabels(
                         month_labels.iloc[month_start_idx],
@@ -1252,7 +1232,6 @@ if uploaded_file is not None:
                         fontweight='bold'
                     )
                     
-                    # Đường dọc phân cách tháng trên cả I Chart và MR Chart
                     for idx in month_start_idx[1:]:
                         separator_x = idx - 0.5
                     
@@ -1342,7 +1321,7 @@ if uploaded_file is not None:
     # ==========================================================
     # TASK 5: TAIL SCRAP & HYBRID TREND
     # ==========================================================
-    import io  # Đảm bảo đã import thư viện này ở đầu file
+    import io 
 
     with tab5:
         st.header("5. Tail Scrap & Length Rejection Analysis")
@@ -1419,18 +1398,17 @@ if uploaded_file is not None:
                 
             st.pyplot(fig_trend)
             
-            # --- THÊM NÚT TẢI ẢNH 1 ---
             buf_trend = io.BytesIO()
             fig_trend.savefig(buf_trend, format="png", bbox_inches="tight", dpi=300)
             buf_trend.seek(0)
             st.download_button(
-                label="📥 Tải biểu đồ Trend về máy (PNG)",
+                label="📥 Download Trend Chart (PNG)",
                 data=buf_trend,
                 file_name="rejection_rate_trend.png",
                 mime="image/png",
                 key="dl_trend"
             )
-            plt.close(fig_trend)  # FIX: Ngăn sập RAM
+            plt.close(fig_trend) 
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
@@ -1466,18 +1444,17 @@ if uploaded_file is not None:
                 
             st.pyplot(fig_p)
             
-            # --- THÊM NÚT TẢI ẢNH 2 ---
             buf_p = io.BytesIO()
             fig_p.savefig(buf_p, format="png", bbox_inches="tight", dpi=300)
             buf_p.seek(0)
             st.download_button(
-                label="📥 Tải biểu đồ Scrap Rate (PNG)",
+                label="📥 Download Scrap Rate Chart (PNG)",
                 data=buf_p,
                 file_name="scrap_rate_by_period.png",
                 mime="image/png",
                 key="dl_period"
             )
-            plt.close(fig_p)  # FIX: Ngăn sập RAM
+            plt.close(fig_p) 
 
             st.dataframe(
                 scrap_by_period.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Reds')
@@ -1528,18 +1505,17 @@ if uploaded_file is not None:
                 
                 st.pyplot(fig_t)
                 
-                # --- THÊM NÚT TẢI ẢNH 3 ---
                 buf_t = io.BytesIO()
                 fig_t.savefig(buf_t, format="png", bbox_inches="tight", dpi=300)
                 buf_t.seek(0)
                 st.download_button(
-                    label="📥 Tải ảnh Thickness",
+                    label="📥 Download Thickness Chart",
                     data=buf_t,
                     file_name="scrap_thickness.png",
                     mime="image/png",
                     key="dl_thick"
                 )
-                plt.close(fig_t)  # FIX: Ngăn sập RAM
+                plt.close(fig_t) 
 
             with col_m:
                 st.markdown("**Scrap Rate by Period & Material**")
@@ -1569,18 +1545,17 @@ if uploaded_file is not None:
                 
                 st.pyplot(fig_m)
                 
-                # --- THÊM NÚT TẢI ẢNH 4 ---
                 buf_m = io.BytesIO()
                 fig_m.savefig(buf_m, format="png", bbox_inches="tight", dpi=300)
                 buf_m.seek(0)
                 st.download_button(
-                    label="📥 Tải ảnh Material",
+                    label="📥 Download Material Chart",
                     data=buf_m,
                     file_name="scrap_material.png",
                     mime="image/png",
                     key="dl_mat"
                 )
-                plt.close(fig_m)  # FIX: Ngăn sập RAM
+                plt.close(fig_m) 
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
             scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
@@ -1595,23 +1570,11 @@ if uploaded_file is not None:
             st.warning("Required columns ('實測長度' or '尾料剔退') not found in the file.")
             
     # ==========================================================
-    # ==========================================================
-    # ==========================================================
     # TASK 6: CUSTOMER END-USE ANALYSIS & MACHINE TRANSITION
     # ==========================================================
     with tab6:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
-        
-        # --- BULLETPROOF FIX: HARDCODE THE EXACT PRODUCTION DATE COLUMN ---
-        # ⚠️ Replace 'YOUR_ACTUAL_DATE_COLUMN' with the exact name of your production date column!
-        PROD_DATE_COL = 'YOUR_ACTUAL_DATE_COLUMN' 
-        
-        if PROD_DATE_COL in df.columns:
-            df['Time_Group'] = pd.to_datetime(df[PROD_DATE_COL], errors='coerce').dt.strftime('%Y-%m')
-        else:
-            st.error(f"System Error: Column '{PROD_DATE_COL}' not found in dataframe. Matrix rows will not display correct months. Please update the column name.")
-        # ------------------------------------------------------------------
 
         possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
         USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
@@ -1621,7 +1584,6 @@ if uploaded_file is not None:
         WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            # --- FIX: Remove virtual 2025 (Full Year) row from raw data for accurate coil aggregation ---
             df_t6_raw = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             df_t6 = df_t6_raw[df_t6_raw[LEN_COL] > 0].copy() 
             
@@ -1645,7 +1607,6 @@ if uploaded_file is not None:
 
             df_sorted = df_t6.sort_values('Usage_Date')
             
-            # --- FIX: Keep the coil in the FIRST month it was cut to match Excel logic ---
             df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
             
             df_first = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first')
@@ -1817,7 +1778,6 @@ if uploaded_file is not None:
                 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
-                # Simplified sort: Prioritizes YYYY-MM format chronological order
                 def custom_time_sort(period_str):
                     p = str(period_str)
                     year = p[:4]
@@ -2158,6 +2118,7 @@ if uploaded_file is not None:
                     st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
+            
     # ==========================================================
     # TASK 7: PRODUCTION-BASED SCRAP & MATERIAL STABILITY
     # ==========================================================
@@ -2165,31 +2126,30 @@ if uploaded_file is not None:
         st.header("7. Production-Based Scrap & Material Stability")
         st.info("Logic: Identifies unique coils to prevent length overcounting. Length is only counted for the first occurrence of repeated coils.")
 
-        # Tạo bản sao dữ liệu và tiền xử lý thời gian sản xuất
         df_t7 = df.dropna(subset=['Production_Date', COIL_ID_COL]).copy()
         
-        # --- LỌC DỮ LIỆU TỪ QUÝ 3/2025 TRỞ ĐI ---
-        df_t7 = df_t7[df_t7['Production_Date'] >= pd.Timestamp(2025, 6, 29)] # Lấy từ Q3 2025
+        # --- FILTER DATA FROM Q3 2025 ONWARDS ---
+        df_t7 = df_t7[df_t7['Production_Date'] >= pd.Timestamp(2025, 6, 29)] 
         
         df_t7['Prod_Month'] = df_t7['Production_Date'].dt.strftime('%Y-%m')
         
-        # --- XỬ LÝ DỮ LIỆU LẶP (COIL DEDUPLICATION) ---
-        # Sắp xếp theo ngày sản xuất để xác định lần đầu tiên xuất hiện
+        # --- COIL DEDUPLICATION ---
+        # Sort by production date to identify first occurrence
         df_t7 = df_t7.sort_values([COIL_ID_COL, 'Production_Date'])
         
-        # Lấy bản ghi đầu tiên của mỗi cuộn để tính Chiều dài (Input Length)
+        # Get first record of each coil for Input Length
         df_unique_first = df_t7.drop_duplicates(subset=[COIL_ID_COL], keep='first')
         monthly_input_len = df_unique_first.groupby('Prod_Month')[LEN_COL].sum()
         
-        # Tính tổng Scrap (Cộng dồn tất cả các lần phát sinh scrap của cuộn đó)
+        # Calculate Total Scrap (Cumulative for the coil)
         monthly_total_scrap = df_t7.groupby('Prod_Month')[SCRAP_COL].sum()
         
-        # Tính giá trị trung bình của cơ tính (Actual Values)
-        # Sử dụng toàn bộ dữ liệu để có cái nhìn tổng quát về độ biến động
+        # Calculate average of mechanical properties
+        # Use all data for overall variation
         prop_cols = [c for c in ['YS', 'TS', 'EL', 'YPE'] if c in df_t7.columns]
         monthly_props = df_t7.groupby('Prod_Month')[prop_cols].mean()
         
-        # Gộp dữ liệu phân tích
+        # Merge analysis data
         t7_summary = pd.DataFrame({
             'Input_Length': monthly_input_len,
             'Total_Scrap': monthly_total_scrap
@@ -2201,7 +2161,7 @@ if uploaded_file is not None:
             0
         ).round(2)
 
-        # --- HIỂN THỊ BIỂU ĐỒ TƯƠNG QUAN ---
+        # --- DISPLAY CORRELATION CHART ---
         st.subheader("Correlation: Scrap Rate vs. Actual Values (Factory Date)")
         
         t7_row1 = st.columns(2)
@@ -2220,14 +2180,14 @@ if uploaded_file is not None:
                 with t7_cols[idx]:
                     fig_t7, ax1 = plt.subplots(figsize=(7, 4.5))
                     
-                    # Trục trái: Scrap Rate
+                    # Left axis: Scrap Rate
                     ax1.set_xlabel('Production Month')
                     ax1.set_ylabel('Scrap Rate (%)', color='#d62728', fontweight='bold')
                     ax1.plot(t7_summary['Prod_Month'], t7_summary['Scrap_Rate (%)'], 
                             color='#d62728', marker='o', linewidth=2.5, label='Scrap Rate')
                     ax1.tick_params(axis='y', labelcolor='#d62728')
                     
-                    # Trục phải: Actual Property
+                    # Right axis: Actual Property
                     ax2 = ax1.twinx()
                     ax2.set_ylabel(label, color=color, fontweight='bold')
                     ax2.plot(t7_summary['Prod_Month'], t7_summary[feat_id], 
@@ -2243,7 +2203,7 @@ if uploaded_file is not None:
                     fig_t7.tight_layout()
                     st.pyplot(fig_t7)
                     
-                    # Nút tải ảnh chất lượng cao cho Task 7
+                    # High-quality image download button for Task 7
                     buf_t7 = io.BytesIO()
                     fig_t7.savefig(buf_t7, format="png", dpi=300, bbox_inches="tight")
                     buf_t7.seek(0)
@@ -2256,9 +2216,9 @@ if uploaded_file is not None:
                         use_container_width=True,
                         key=f"dl_t7_chart_{idx}" 
                     )
-                    plt.close(fig_t7) # FIX: Ngăn sập RAM
+                    plt.close(fig_t7)
 
-        # Hiển thị bảng dữ liệu chi tiết
+        # Display detailed data table
         st.markdown("### Production Monthly Analytics Data")
         st.dataframe(
             t7_summary.style.format({
