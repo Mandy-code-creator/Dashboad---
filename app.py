@@ -1427,7 +1427,7 @@ if uploaded_file is not None:
                 
                 if available_grades:
                     grade_data = df_t6.groupby(['Usage_Month', 'Time_Group'])[available_grades].sum().reset_index()
-                    matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Time_Group'], how='left')
+                    matrix_data = pd.merge(matrix_data, grade_data, on=['Usage_Month', 'Production_Group'], how='left')
                 
                 matrix_data['Scrap_Rate'] = np.where(matrix_data['Total_Length'] > 0, (matrix_data['Total_Scrap'] / matrix_data['Total_Length']) * 100, 0).round(2)
                 
