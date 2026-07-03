@@ -10,7 +10,14 @@ from PIL import Image
 from docx import Document
 from docx.shared import Inches
 import tempfile
-
+# --- ADD THIS HELPER FUNCTION TO THE TOP OF YOUR FILE ---
+def get_color(rate):
+    if pd.isna(rate): return "#ffffff" 
+    if rate < 2.0: return "#e8f5e9" 
+    if rate < 5.0: return "#fff3e0" 
+    if rate < 10.0: return "#ffcdd2" 
+    return "#e57373"
+# --------------------------------------------------------
 # --- FIX: Disable pixel limit to prevent DecompressionBombError ---
 Image.MAX_IMAGE_PIXELS = None
 
