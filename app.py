@@ -1611,7 +1611,7 @@ if uploaded_file is not None:
         WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
 
         if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            # --- FIX: Bỏ dòng ảo 2025 (Full Year) khỏi dữ liệu gốc để xử lý gộp cuộn chuẩn xác ---
+            # --- FIX: Remove virtual 2025 (Full Year) row from raw data for accurate coil aggregation ---
             df_t6_raw = df[df['Time_Group'] != "2025 (Full Year)"].copy()
             df_t6 = df_t6_raw[df_t6_raw[LEN_COL] > 0].copy() 
             
@@ -1628,24 +1628,15 @@ if uploaded_file is not None:
 
             df_t6 = df_t6.dropna(subset=['Usage_Date'])
 
+            # --- APPLIED FIX: Enforce strict YYYY-MM formatting for all usage dates ---
             def format_usage_group(d):
-                if d.year <= 2024:
-                    return "2024 (Full Year)"
-                elif d.year == 2025:
-                    if d <= pd.Timestamp(2025, 6, 28):
-                        return "2025 H1 (Until 06/28)"
-                    elif pd.Timestamp(2025, 6, 29) <= d <= pd.Timestamp(2025, 9, 30):
-                        return "2025 Q3 (06/29 - 09/30)"
-                    else:
-                        return d.strftime('%Y-%m')
-                else:
-                    return d.strftime('%Y-%m') 
+                return d.strftime('%Y-%m') 
             
             df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
 
             df_sorted = df_t6.sort_values('Usage_Date')
             
-            # --- FIX: Giữ lại cuộn ở tháng ĐẦU TIÊN mang ra cắt để khớp Excel ---
+            # --- FIX: Keep the coil in the FIRST month it was cut to match Excel logic ---
             df_coil = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
             
             df_first = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first')
@@ -1795,7 +1786,7 @@ if uploaded_file is not None:
                 st.markdown("---")
                 
                 # ==========================================
-               # Production vs Usage Quality Matrix
+                # Production vs Usage Quality Matrix
                 # ==========================================
                 st.subheader("Production vs Usage Quality Matrix (Main Chart)")
                 st.info("Evaluates Material Stability, Inventory Traceability, Machine Impact, and Quality Transition.")
