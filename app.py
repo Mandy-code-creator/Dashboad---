@@ -10,6 +10,7 @@ from PIL import Image
 from docx import Document
 from docx.shared import Inches
 import tempfile
+import re
 # --- ADD THIS HELPER FUNCTION TO THE TOP OF YOUR FILE ---
 def get_color(rate):
     if pd.isna(rate): return "#ffffff" 
@@ -62,35 +63,97 @@ if uploaded_file is not None:
     df_source_all = df.copy()
 
     # --- 1. DATA PRE-PROCESSING ---
-    # Handle Dates & Time Grouping First
-    date_key = '烤三生產日期' 
-    if date_key in df.columns:
-        d_str = df[date_key].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df['Production_Date'] = pd.to_datetime(d_str, format='%Y%m%d', errors='coerce')
-        
-        # RESTORED ORIGINAL LOGIC: Keeps quarterly/half-yearly grouping for other tasks
-        def categorize_period(d):
-            if pd.isnull(d): return "Unknown"
-            y = d.year
-            q3_s, q3_e = pd.Timestamp(2025, 6, 29), pd.Timestamp(2025, 9, 30)
-            
-            if y == 2024: return "2024 (Full Year)"
-            if y == 2025:
-                if d < q3_s: return "2025 H1 (Until 06/28)"
-                if q3_s <= d <= q3_e: return "2025 Q3 (06/29 - 09/30)"
-                return d.strftime('%Y-%m')
-            if y >= 2026: return d.strftime('%Y-%m')
-            return "Other"
-            
-        df['Time_Group'] = df['Production_Date'].apply(categorize_period)
-        df = df[df['Time_Group'] != "Other"]
-        
-        df_25 = df[df['Production_Date'].dt.year == 2025].copy()
-        if not df_25.empty:
-            df_25['Time_Group'] = "2025 (Full Year)"
-            df = pd.concat([df, df_25], ignore_index=True)
+    # ==========================================================
+    # GLOBAL PRODUCTION TIME LOGIC
+    # ----------------------------------------------------------
+    # Primary source : 烤三生產日期
+    # Fallback       : 年度 + 月份
+    #
+    # Display rule used by Tabs 1/2/3/5/7:
+    #   2024          -> 2024 (Full Year)
+    #   2025 onward   -> YYYY-MM
+    #
+    # This prevents months such as 2025-08 from being hidden
+    # inside old H1 / Q3 / Full-Year groups.
+    # ==========================================================
+
+    def _clean_date_string(series):
+        return (
+            series.astype(str)
+            .str.strip()
+            .str.replace(r'\.0$', '', regex=True)
+            .replace({
+                '': np.nan,
+                'nan': np.nan,
+                'NaN': np.nan,
+                'None': np.nan,
+                'NULL': np.nan,
+            })
+        )
+
+    def _parse_month_value(series):
+        chinese_month_map = {
+            '一月': 1, '二月': 2, '三月': 3, '四月': 4,
+            '五月': 5, '六月': 6, '七月': 7, '八月': 8,
+            '九月': 9, '十月': 10, '十一月': 11, '十二月': 12,
+        }
+        s = _clean_date_string(series)
+        mapped = s.map(chinese_month_map)
+        numeric = pd.to_numeric(
+            s.astype(str).str.replace('月', '', regex=False).str.strip(),
+            errors='coerce'
+        )
+        return mapped.where(mapped.notna(), numeric)
+
+    if '烤三生產日期' in df.columns:
+        prod_raw = _clean_date_string(df['烤三生產日期'])
+        production_date = pd.to_datetime(
+            prod_raw,
+            format='%Y%m%d',
+            errors='coerce'
+        )
+
+        missing = production_date.isna() & prod_raw.notna()
+        if missing.any():
+            production_date.loc[missing] = pd.to_datetime(
+                prod_raw.loc[missing],
+                errors='coerce'
+            )
     else:
-        df['Time_Group'] = "Unknown"
+        production_date = pd.Series(pd.NaT, index=df.index, dtype='datetime64[ns]')
+
+    if '年度' in df.columns and '月份' in df.columns:
+        prod_year = pd.to_numeric(
+            _clean_date_string(df['年度']),
+            errors='coerce'
+        )
+        prod_month = _parse_month_value(df['月份'])
+
+        fallback_prod = pd.to_datetime(
+            pd.DataFrame({
+                'year': prod_year,
+                'month': prod_month,
+                'day': 1,
+            }),
+            errors='coerce'
+        )
+        production_date = production_date.fillna(fallback_prod)
+
+    df['Production_Date'] = production_date
+
+    def categorize_period(d):
+        if pd.isna(d):
+            return 'Unknown'
+        if d.year == 2024:
+            return '2024 (Full Year)'
+        if d.year >= 2025:
+            return d.strftime('%Y-%m')
+        return 'Other'
+
+    df['Time_Group'] = df['Production_Date'].apply(categorize_period)
+    df = df[df['Time_Group'] != 'Other'].copy()
+
+    # Do not append a duplicated 2025 Full-Year copy.
 
     # Robust Quality Grade Mapping
     base_grades = ['A-B+', 'A-B', 'A-B-', 'B+', 'B']
@@ -194,11 +257,14 @@ if uploaded_file is not None:
 
     # --- GLOBAL HELPER & SORTING FUNCTIONS ---
     def get_sort_key(x):
-        if "2024 (Full Year)" in x: return "2024-00"
-        if "2025 H1" in x: return "2025-00a"
-        if "2025 Q3" in x: return "2025-00b"
-        if "2025 (Full Year)" in x: return "2025-99" 
-        return x
+        p = str(x).strip()
+        if p == '2024 (Full Year)':
+            return '2024-00'
+        if re.fullmatch(r'\d{4}-\d{2}', p):
+            return p
+        if p == 'Unknown':
+            return '9999-99'
+        return p
 
     def custom_time_sort(period_str):
         p = str(period_str)
@@ -217,9 +283,15 @@ if uploaded_file is not None:
 
     # --- SPC & CAPABILITY HELPER FUNCTIONS ---
     def is_valid_for_control(period_label):
-        if "2024" in period_label or "2025 H1" in period_label or "2025 Q3" in period_label or "2025 (Full Year)" in period_label:
+        # Capability limits apply from 2025-10 (Q4 2025) onward.
+        p = str(period_label).strip()
+        if not re.fullmatch(r'\d{4}-\d{2}', p):
             return False
-        return True
+        try:
+            period_month = pd.to_datetime(p + '-01', format='%Y-%m-%d')
+        except Exception:
+            return False
+        return period_month >= pd.Timestamp(2025, 10, 1)
 
     def calc_capability(values, feat, period_label, thickness):
         vals = np.array(values, dtype=float)
@@ -565,6 +637,15 @@ if uploaded_file is not None:
         else:
             col_m3.metric("Date Range", "N/A")
             
+        recognized_global_months = sorted(
+            [m for m in df['Time_Group'].dropna().unique().tolist() if m != 'Unknown'],
+            key=get_sort_key
+        )
+        st.caption(
+            "Recognized Production Periods: "
+            + (", ".join(recognized_global_months) if recognized_global_months else "None")
+        )
+
         st.markdown("### Filtered Data Preview")
         st.dataframe(df.head(50), use_container_width=True)
 
@@ -607,7 +688,7 @@ if uploaded_file is not None:
             st.info("No yield data available to display in this view.")
 
         st.markdown("---")
-        st.subheader("📊 Grade Distribution & Scrap by Time Period (%)")
+        st.subheader("📊 Grade Distribution & Scrap by Production Period (%)")
         st.caption("Note: This summary table evaluates 100% of production data. Detailed charts below are filtered to specific thickness groups.")
         
         grade_dist = df_global_grades.groupby('Time_Group')[base_grades].sum()
@@ -732,9 +813,6 @@ if uploaded_file is not None:
     
         cap_summary_rows = []
         for _p in ordered_periods:
-            if _p == "2025 (Full Year)":
-                continue
-    
             _dfp = df[df['Time_Group'] == _p]
             _dfp_valid = _dfp[_dfp['Valid_Qty'] > 0]
     
@@ -783,9 +861,6 @@ if uploaded_file is not None:
             st.markdown("---")
     
         for period in ordered_periods:
-            if period == "2025 (Full Year)":
-                continue
-    
             df_p = df[df['Time_Group'] == period]
             if df_p.empty:
                 continue
@@ -1020,7 +1095,7 @@ if uploaded_file is not None:
         COIL_ID_COL = '鋼捲號碼'
 
         if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df_t5 = df[df['Time_Group'] != "2025 (Full Year)"].copy()
+            df_t5 = df.copy()
             df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
             
             missing_mask = df_t5[COIL_ID_COL].isna()
@@ -1070,7 +1145,7 @@ if uploaded_file is not None:
 
             # --- 2. PERIOD SUMMARY & CHART ---
             st.markdown("---")
-            st.subheader("Scrap Rate by Time Period")
+            st.subheader("Scrap Rate by Production Period")
             scrap_by_period = df_scrap_master.groupby('Time_Group').agg(Total_Length=(LEN_COL, 'sum'), Total_Scrap=(SCRAP_COL, 'sum'), Coil_Count=(COIL_ID_COL, 'count')).reset_index()
             scrap_by_period['Scrap_Rate (%)'] = np.where(scrap_by_period['Total_Length'] > 0, (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100), 0).round(2)
             
@@ -1080,7 +1155,7 @@ if uploaded_file is not None:
             fig_p, ax_p = plt.subplots(figsize=(10, 4))
             if not scrap_by_period.empty:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
-                ax_p.set_title("Tail Scrap Rate (%) by Time Period", fontweight='bold')
+                ax_p.set_title("Tail Scrap Rate (%) by Production Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
                 ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
@@ -1105,7 +1180,7 @@ if uploaded_file is not None:
 
             # --- 3. LEVEL-BY-LEVEL DRILL DOWN & CHARTS ---
             st.markdown("---")
-            st.subheader("Deep Analysis: Scrap Rate by Period / Thickness / Material")
+            st.subheader("Deep Analysis: Scrap Rate by Production Period / Thickness / Material")
             
             scrap_detail = df_scrap_master.groupby(['Time_Group', 'Actual_Thickness', 'HR_Material']).agg(Total_Length=(LEN_COL, 'sum'), Total_Scrap=(SCRAP_COL, 'sum'), Coil_Count=(COIL_ID_COL, 'count')).reset_index()
             scrap_detail = scrap_detail[scrap_detail['Total_Length'] > 0]
@@ -1113,7 +1188,7 @@ if uploaded_file is not None:
             
             col_t, col_m = st.columns(2)
             with col_t:
-                st.markdown("**Scrap Rate by Period & Thickness**")
+                st.markdown("**Scrap Rate by Production Period & Thickness**")
                 fig_t, ax_t = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
                     thick_agg = scrap_detail.groupby(['Time_Group', 'Actual_Thickness']).agg(T_Len=('Total_Length', 'sum'), T_Scrap=('Total_Scrap', 'sum'))
@@ -1141,7 +1216,7 @@ if uploaded_file is not None:
                 plt.close(fig_t)
 
             with col_m:
-                st.markdown("**Scrap Rate by Period & Material**")
+                st.markdown("**Scrap Rate by Production Period & Material**")
                 fig_m, ax_m = plt.subplots(figsize=(8, 4))
                 if not scrap_detail.empty:
                     mat_agg = scrap_detail.groupby(['Time_Group', 'HR_Material']).agg(M_Len=('Total_Length', 'sum'), M_Scrap=('Total_Scrap', 'sum'))
