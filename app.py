@@ -54,6 +54,13 @@ if uploaded_file is not None:
     df = pd.read_excel(uploaded_file)
     df.columns = df.columns.astype(str).str.strip()
 
+    # Keep one untouched source copy for Task 6 (Production vs Usage Matrix).
+    # IMPORTANT:
+    # The main dashboard later filters rows by standardized thickness.
+    # The customer-usage matrix must NOT lose coils simply because their
+    # thickness is outside the detailed SPC thickness groups.
+    df_source_all = df.copy()
+
     # --- 1. DATA PRE-PROCESSING ---
     # Handle Dates & Time Grouping First
     date_key = '烤三生產日期' 
@@ -1178,70 +1185,339 @@ if uploaded_file is not None:
         st.header("6. Customer End-Use Analysis & Machine Transition")
         st.info("Customer End-Use Root Cause Verification System: Evaluating material stability vs. machine impact.")
 
-        possible_usage_cols = ['使用日期', '使用月份', 'Usage Date', 'Usage Month']
-        USAGE_COL = next((c for c in possible_usage_cols if c in df.columns), None) 
+        # ==========================================================
+        # TASK 6 TIME LOGIC
+        # ----------------------------------------------------------
+        # TWO DIFFERENT TIME AXES ARE KEPT SEPARATELY:
+        #
+        #   Production time:
+        #       Primary  = 烤三生產日期
+        #       Fallback = 年度 + 月份
+        #
+        #   Customer usage time:
+        #       Primary  = 使用日期 / Usage Date
+        #       Fallback = 使用年度 + 使用月份
+        #
+        # Matrix rows    = Production period
+        # Matrix columns = Customer usage month
+        # ==========================================================
+
+        possible_usage_date_cols = ['使用日期', 'Usage Date']
+        possible_usage_month_cols = ['使用月份', 'Usage Month']
+
+        USAGE_DATE_COL = next(
+            (c for c in possible_usage_date_cols if c in df_source_all.columns),
+            None
+        )
+        USAGE_MONTH_COL = next(
+            (c for c in possible_usage_month_cols if c in df_source_all.columns),
+            None
+        )
+
+        # Backward-compatible variable used by the rest of the app.
+        USAGE_COL = USAGE_DATE_COL or USAGE_MONTH_COL
+
         COIL_ID_COL = '鋼捲號碼'
-        
+
         possible_wt_cols = ['重量', 'Weight', 'WT', 'Net_Weight', 'Net Weight']
-        WT_COL = next((c for c in possible_wt_cols if c in df.columns), 'Weight')
+        WT_COL = next(
+            (c for c in possible_wt_cols if c in df_source_all.columns),
+            'Weight'
+        )
 
-        if USAGE_COL and COIL_ID_COL in df.columns and LEN_COL in df.columns and SCRAP_COL in df.columns: 
-            # --- APPLIED DRILL-DOWN FIX: Override global Time_Group to pure monthly format LOCALLY for Task 6 ---
-            df_t6_raw = df.copy()
-            if 'Production_Date' in df_t6_raw.columns:
-                df_t6_raw['Time_Group'] = df_t6_raw['Production_Date'].apply(lambda d: d.strftime('%Y-%m') if pd.notnull(d) else "Unknown")
-            
-            # Filter valid data entries
-            df_t6 = df_t6_raw[df_t6_raw[LEN_COL] > 0].copy() 
-            df_t6[COIL_ID_COL] = df_t6[COIL_ID_COL].astype(str).str.strip()
-            df_t6 = df_t6[df_t6[COIL_ID_COL] != 'nan']
+        if (
+            USAGE_COL
+            and COIL_ID_COL in df_source_all.columns
+            and LEN_COL in df_source_all.columns
+            and SCRAP_COL in df_source_all.columns
+        ):
+            # ------------------------------------------------------
+            # Use the UNFILTERED source.
+            # This is the key fix for months such as 2025-08 that
+            # were previously lost after the thickness-group filter.
+            # ------------------------------------------------------
+            df_t6_raw = df_source_all.copy()
 
-            if WT_COL in df_t6.columns:
-                df_t6[WT_COL] = pd.to_numeric(df_t6[WT_COL], errors='coerce').fillna(0)
+            # ------------------------------------------------------
+            # Helpers for robust month/date parsing
+            # ------------------------------------------------------
+            chinese_month_map = {
+                '一月': 1, '二月': 2, '三月': 3, '四月': 4,
+                '五月': 5, '六月': 6, '七月': 7, '八月': 8,
+                '九月': 9, '十月': 10, '十一月': 11, '十二月': 12,
+            }
 
-            if not pd.api.types.is_datetime64_any_dtype(df_t6[USAGE_COL]):
-                df_t6['Usage_Date'] = pd.to_datetime(df_t6[USAGE_COL].astype(str).str.strip(), dayfirst=True, errors='coerce')
+            def _clean_excel_string(series):
+                return (
+                    series.astype(str)
+                    .str.strip()
+                    .str.replace(r'\\.0$', '', regex=True)
+                    .replace({
+                        '': np.nan,
+                        'nan': np.nan,
+                        'NaN': np.nan,
+                        'None': np.nan,
+                        'NULL': np.nan,
+                    })
+                )
+
+            def _parse_month_number(series):
+                s = _clean_excel_string(series)
+
+                # Chinese month labels such as 四月 / 八月.
+                mapped = s.map(chinese_month_map)
+
+                # Numeric / text month such as 4, 04, "04月".
+                numeric_text = (
+                    s.astype(str)
+                    .str.replace('月', '', regex=False)
+                    .str.strip()
+                )
+                numeric = pd.to_numeric(numeric_text, errors='coerce')
+
+                out = mapped.where(mapped.notna(), numeric)
+                return pd.to_numeric(out, errors='coerce')
+
+            # ======================================================
+            # A. PRODUCTION TIME
+            # ======================================================
+            # Primary source: 烤三生產日期
+            if '烤三生產日期' in df_t6_raw.columns:
+                prod_raw = _clean_excel_string(
+                    df_t6_raw['烤三生產日期']
+                )
+
+                # First try the expected YYYYMMDD form.
+                prod_date = pd.to_datetime(
+                    prod_raw,
+                    format='%Y%m%d',
+                    errors='coerce'
+                )
+
+                # Fallback for Excel/date-like strings such as
+                # 2025/08/27, 2025-08-27, etc.
+                missing_prod = prod_date.isna() & prod_raw.notna()
+                if missing_prod.any():
+                    prod_date.loc[missing_prod] = pd.to_datetime(
+                        prod_raw.loc[missing_prod],
+                        errors='coerce'
+                    )
+
+                df_t6_raw['Production_Date'] = prod_date
             else:
-                df_t6['Usage_Date'] = df_t6[USAGE_COL]
+                df_t6_raw['Production_Date'] = pd.NaT
 
-            df_t6 = df_t6.dropna(subset=['Usage_Date'])
+            # Fallback: 年度 + 月份
+            if '年度' in df_t6_raw.columns and '月份' in df_t6_raw.columns:
+                prod_year = pd.to_numeric(
+                    _clean_excel_string(df_t6_raw['年度']),
+                    errors='coerce'
+                )
+                prod_month = _parse_month_number(
+                    df_t6_raw['月份']
+                )
 
-            def format_usage_group(d):
-                return d.strftime('%Y-%m') 
-            
-            df_t6['Usage_Month'] = df_t6['Usage_Date'].apply(format_usage_group)
+                fallback_prod = pd.to_datetime(
+                    pd.DataFrame({
+                        'year': prod_year,
+                        'month': prod_month,
+                        'day': 1,
+                    }),
+                    errors='coerce'
+                )
 
-            # ==========================================================
-            # COIL MASTER TABLE — one physical coil counted once
-            # Length / Weight: use one value per 鋼捲號碼 (max avoids blank/0 duplicates)
-            # Scrap: sum all repeated records of the same coil
-            # Usage month: assign to the earliest recorded usage date
-            # ==========================================================
-            df_sorted = df_t6.copy()
-            df_sorted[COIL_ID_COL] = (
-                df_sorted[COIL_ID_COL]
+                df_t6_raw['Production_Date'] = (
+                    df_t6_raw['Production_Date']
+                    .fillna(fallback_prod)
+                )
+
+            df_t6_raw['Production_Month'] = (
+                df_t6_raw['Production_Date']
+                .dt.strftime('%Y-%m')
+            )
+
+            # ======================================================
+            # B. CUSTOMER USAGE TIME
+            # ======================================================
+            df_t6_raw['Usage_Date'] = pd.NaT
+
+            # Primary source: 使用日期 / Usage Date
+            if USAGE_DATE_COL is not None:
+                usage_raw = _clean_excel_string(
+                    df_t6_raw[USAGE_DATE_COL]
+                )
+
+                # pd.to_datetime handles values such as 2026/4/17.
+                usage_date = pd.to_datetime(
+                    usage_raw,
+                    errors='coerce'
+                )
+
+                # Some regional date inputs may parse better day-first.
+                missing_usage = usage_date.isna() & usage_raw.notna()
+                if missing_usage.any():
+                    usage_date.loc[missing_usage] = pd.to_datetime(
+                        usage_raw.loc[missing_usage],
+                        dayfirst=True,
+                        errors='coerce'
+                    )
+
+                df_t6_raw['Usage_Date'] = usage_date
+
+            # Fallback: 使用年度 + 使用月份
+            if (
+                '使用年度' in df_t6_raw.columns
+                and USAGE_MONTH_COL is not None
+            ):
+                usage_year = pd.to_numeric(
+                    _clean_excel_string(df_t6_raw['使用年度']),
+                    errors='coerce'
+                )
+                usage_month = _parse_month_number(
+                    df_t6_raw[USAGE_MONTH_COL]
+                )
+
+                fallback_usage = pd.to_datetime(
+                    pd.DataFrame({
+                        'year': usage_year,
+                        'month': usage_month,
+                        'day': 1,
+                    }),
+                    errors='coerce'
+                )
+
+                df_t6_raw['Usage_Date'] = (
+                    df_t6_raw['Usage_Date']
+                    .fillna(fallback_usage)
+                )
+
+            df_t6_raw['Usage_Month'] = (
+                df_t6_raw['Usage_Date']
+                .dt.strftime('%Y-%m')
+            )
+
+            # ------------------------------------------------------
+            # Rebuild quality-grade quantities on the raw Task-6 source.
+            # This is necessary because df_source_all was saved before
+            # the main-dashboard grade preprocessing.
+            # ------------------------------------------------------
+            for g in base_grades:
+                match_cols = []
+                for c in df_t6_raw.columns:
+                    c_str = str(c).strip()
+                    if (
+                        c_str == g
+                        or c_str == f"{g}個數"
+                        or c_str.startswith(f"{g}.")
+                    ):
+                        match_cols.append(c)
+
+                if match_cols:
+                    df_t6_raw[g] = (
+                        df_t6_raw[match_cols]
+                        .apply(pd.to_numeric, errors='coerce')
+                        .fillna(0)
+                        .sum(axis=1)
+                    )
+                else:
+                    df_t6_raw[g] = 0
+
+            # Local mechanical-property naming, because Task 6 is based
+            # on the unfiltered original source.
+            local_mech_rename = {
+                '烤漆降伏強度': 'YS',
+                '烤漆抗拉強度': 'TS',
+                '伸長率': 'EL',
+            }
+            df_t6_raw.rename(
+                columns={
+                    k: v for k, v in local_mech_rename.items()
+                    if k in df_t6_raw.columns and v not in df_t6_raw.columns
+                },
+                inplace=True
+            )
+
+            for f in ['YS', 'TS', 'EL', 'YPE']:
+                if f in df_t6_raw.columns:
+                    df_t6_raw[f] = pd.to_numeric(
+                        df_t6_raw[f],
+                        errors='coerce'
+                    )
+
+            # Length / scrap / weight numeric cleanup.
+            df_t6_raw[LEN_COL] = pd.to_numeric(
+                df_t6_raw[LEN_COL],
+                errors='coerce'
+            ).fillna(0)
+
+            df_t6_raw[SCRAP_COL] = pd.to_numeric(
+                df_t6_raw[SCRAP_COL],
+                errors='coerce'
+            ).fillna(0)
+
+            if WT_COL in df_t6_raw.columns:
+                df_t6_raw[WT_COL] = pd.to_numeric(
+                    df_t6_raw[WT_COL],
+                    errors='coerce'
+                ).fillna(0)
+            else:
+                df_t6_raw[WT_COL] = 0
+
+            # Keep records required for customer-usage analysis.
+            # Do NOT filter by standardized thickness here.
+            df_t6 = df_t6_raw[
+                (df_t6_raw[LEN_COL] > 0)
+                & df_t6_raw['Usage_Date'].notna()
+                & df_t6_raw['Production_Date'].notna()
+            ].copy()
+
+            df_t6[COIL_ID_COL] = (
+                df_t6[COIL_ID_COL]
                 .astype(str)
                 .str.strip()
                 .str.upper()
-                .str.replace(r"\.0$", "", regex=True)
-                .replace({"": np.nan, "NAN": np.nan, "NONE": np.nan, "NULL": np.nan})
+                .str.replace(r"\\.0$", "", regex=True)
+                .replace({
+                    "": np.nan,
+                    "NAN": np.nan,
+                    "NONE": np.nan,
+                    "NULL": np.nan,
+                })
             )
-            df_sorted = df_sorted.dropna(subset=[COIL_ID_COL]).copy()
+            df_t6 = df_t6.dropna(
+                subset=[COIL_ID_COL]
+            ).copy()
 
-            df_sorted[LEN_COL] = pd.to_numeric(df_sorted[LEN_COL], errors='coerce').fillna(0)
-            df_sorted[SCRAP_COL] = pd.to_numeric(df_sorted[SCRAP_COL], errors='coerce').fillna(0)
-            if WT_COL in df_sorted.columns:
-                df_sorted[WT_COL] = pd.to_numeric(df_sorted[WT_COL], errors='coerce').fillna(0)
-            else:
-                df_sorted[WT_COL] = 0
+            # ======================================================
+            # COIL MASTER TABLE — one physical coil counted once
+            # ======================================================
+            # Production month and usage month remain separate.
+            #
+            # For physical output totals:
+            #   length / weight are counted ONCE per coil.
+            #
+            # For coils duplicated in source rows:
+            #   earliest valid Usage_Date is used as the coil's
+            #   primary usage month in the matrix.
+            #
+            # This prevents output length/weight double-counting.
+            # ======================================================
+            df_sorted = df_t6.sort_values(
+                [COIL_ID_COL, 'Usage_Date', 'Production_Date']
+            ).copy()
 
-            # First usage record holds the coil's production/usage attributes.
-            df_sorted = df_sorted.sort_values([COIL_ID_COL, 'Usage_Date', 'Production_Date'])
-            df_coil_base = df_sorted.drop_duplicates(subset=[COIL_ID_COL], keep='first').copy()
+            df_coil_base = (
+                df_sorted
+                .drop_duplicates(
+                    subset=[COIL_ID_COL],
+                    keep='first'
+                )
+                .copy()
+            )
 
-            # Physical coil values are aggregated once per coil.
             coil_master = (
-                df_sorted.groupby(COIL_ID_COL, as_index=False)
+                df_sorted
+                .groupby(COIL_ID_COL, as_index=False)
                 .agg(
                     Coil_Length=(LEN_COL, 'max'),
                     Coil_Weight=(WT_COL, 'max'),
@@ -1251,25 +1527,122 @@ if uploaded_file is not None:
 
             df_coil = (
                 df_coil_base
-                .drop(columns=[LEN_COL, WT_COL, SCRAP_COL], errors='ignore')
-                .merge(coil_master, on=COIL_ID_COL, how='left')
+                .drop(
+                    columns=[LEN_COL, WT_COL, SCRAP_COL],
+                    errors='ignore'
+                )
+                .merge(
+                    coil_master,
+                    on=COIL_ID_COL,
+                    how='left'
+                )
             )
-            df_coil[LEN_COL] = df_coil['Coil_Length'].fillna(0)
-            df_coil[WT_COL] = df_coil['Coil_Weight'].fillna(0)
-            df_coil[SCRAP_COL] = df_coil['Coil_Total_Scrap'].fillna(0)
-            df_coil = df_coil.drop(columns=['Coil_Length', 'Coil_Weight', 'Coil_Total_Scrap'])
+
+            df_coil[LEN_COL] = (
+                df_coil['Coil_Length']
+                .fillna(0)
+            )
+            df_coil[WT_COL] = (
+                df_coil['Coil_Weight']
+                .fillna(0)
+            )
+            df_coil[SCRAP_COL] = (
+                df_coil['Coil_Total_Scrap']
+                .fillna(0)
+            )
+            df_coil = df_coil.drop(
+                columns=[
+                    'Coil_Length',
+                    'Coil_Weight',
+                    'Coil_Total_Scrap',
+                ]
+            )
+
+            # Recalculate month labels after one-coil aggregation.
+            df_coil['Production_Month'] = (
+                df_coil['Production_Date']
+                .dt.strftime('%Y-%m')
+            )
+            df_coil['Usage_Month'] = (
+                df_coil['Usage_Date']
+                .dt.strftime('%Y-%m')
+            )
+
+            # ------------------------------------------------------
+            # Visible time-axis audit.
+            # This makes it immediately clear whether August exists
+            # in Production Time, Usage Time, or both.
+            # ------------------------------------------------------
+            with st.expander(
+                "🗓️ Production / Usage Time Recognition Audit",
+                expanded=False
+            ):
+                recognized_prod = sorted(
+                    df_coil['Production_Month']
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+                recognized_usage = sorted(
+                    df_coil['Usage_Month']
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+
+                c_prod, c_usage = st.columns(2)
+
+                with c_prod:
+                    st.markdown("**Production months**")
+                    st.write(
+                        ", ".join(recognized_prod)
+                        if recognized_prod
+                        else "No valid production month"
+                    )
+
+                with c_usage:
+                    st.markdown("**Usage months**")
+                    st.write(
+                        ", ".join(recognized_usage)
+                        if recognized_usage
+                        else "No valid usage month"
+                    )
+
+                time_audit = (
+                    df_coil[
+                        [
+                            COIL_ID_COL,
+                            'Production_Date',
+                            'Production_Month',
+                            'Usage_Date',
+                            'Usage_Month',
+                            LEN_COL,
+                            WT_COL,
+                            SCRAP_COL,
+                        ]
+                    ]
+                    .sort_values(
+                        ['Production_Date', 'Usage_Date', COIL_ID_COL]
+                    )
+                )
+
+                st.dataframe(
+                    time_audit,
+                    use_container_width=True,
+                    hide_index=True
+                )
 
             # =========================================================================
             # 🔍 METHOD 3: MISSING COILS FINDER & TRACER BULLET (DEBUGGING)
             # =========================================================================
             st.markdown("---")
-            st.markdown("### 🕵️‍♂️ Debug: Missing Coils Finder & Tracer")
+            st.markdown("### 🕵️‍♂️ Debug: Usage-Month Coil Finder & Tracer")
             col_find, col_trace = st.columns(2)
             
             with col_find:
                 st.write("**Step 1: Find Missing Coils**")
                 available_months = sorted(df_sorted['Usage_Month'].unique(), reverse=True)
-                check_month = st.selectbox("Select Usage Month:", available_months)
+                check_month = st.selectbox("Select Customer Usage Month:", available_months)
                 
                 if check_month:
                     raw_coils = set(df_sorted[df_sorted['Usage_Month'] == check_month][COIL_ID_COL].dropna().unique())
@@ -1695,7 +2068,7 @@ if uploaded_file is not None:
                     use_container_width=True,
                     key="dl_matrix_word"
                 )
-                st.caption("Matrix Logic: Columns = Usage Month | Rows = Production Period | Background Color = Scrap Severity")
+                st.caption("Matrix Logic: Columns = Customer Usage Month | Rows = Production Month (2024 grouped as Full Year) | Production source = 烤三生產日期 | Usage source = 使用日期 | Background Color = Scrap Severity")
                 st.markdown("---")
                 
                 # Split Coil Verification
