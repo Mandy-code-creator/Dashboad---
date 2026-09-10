@@ -1352,9 +1352,26 @@ if uploaded_file is not None:
                 ax_trend.set_title("Rejection Rate Trend", fontweight='bold', fontsize=15, pad=15, color='#333')
                 ax_trend.set_ylabel("Rejection Rate (%)", fontweight='bold', color='#555')
                 
+                # Label only non-zero rates to avoid overlap of repeated 0.00% labels.
                 for i, val in enumerate(trend_data['Rejection_Rate (%)']):
-                    ax_trend.annotate(f'{val:.2f}%', xy=(i, val), xytext=(0, 8), textcoords="offset points", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#222',
-                                      bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
+                    if pd.notna(val) and abs(float(val)) > 1e-9:
+                        ax_trend.annotate(
+                            f'{val:.2f}%',
+                            xy=(i, val),
+                            xytext=(0, 8),
+                            textcoords="offset points",
+                            ha='center',
+                            va='bottom',
+                            fontsize=9,
+                            fontweight='bold',
+                            color='#222',
+                            bbox=dict(
+                                boxstyle="round,pad=0.25",
+                                fc="white",
+                                ec="none",
+                                alpha=0.85
+                            )
+                        )
                 add_chart_border(ax_trend)
                 plt.xticks(rotation=45, ha='right', fontsize=9)
                 fig_trend.tight_layout()
@@ -1376,16 +1393,27 @@ if uploaded_file is not None:
             scrap_by_period['_sort'] = scrap_by_period['Time_Group'].apply(get_sort_key)
             scrap_by_period = scrap_by_period.sort_values('_sort').drop(columns=['_sort'])
             
-            fig_p, ax_p = plt.subplots(figsize=(10, 4))
+            fig_p, ax_p = plt.subplots(figsize=(12, 4.6))
             if not scrap_by_period.empty:
                 ax_p.bar(scrap_by_period['Time_Group'], scrap_by_period['Scrap_Rate (%)'], color='#e74c3c', edgecolor='white')
                 ax_p.set_title("Tail Scrap Rate (%) by Production Period", fontweight='bold')
                 ax_p.set_ylabel("Scrap Rate (%)")
                 ax_p.set_ylim(0, scrap_by_period['Scrap_Rate (%)'].max() * 1.2 + 0.1)
+                # Label only non-zero bars to prevent repeated 0.00% labels from overlapping.
                 for i, val in enumerate(scrap_by_period['Scrap_Rate (%)']):
-                    ax_p.annotate(f"{val:.2f}%", xy=(i, val), xytext=(0, 5), textcoords="offset points", ha='center', va='bottom', fontweight='bold')
+                    if pd.notna(val) and abs(float(val)) > 1e-9:
+                        ax_p.annotate(
+                            f"{val:.2f}%",
+                            xy=(i, val),
+                            xytext=(0, 6),
+                            textcoords="offset points",
+                            ha='center',
+                            va='bottom',
+                            fontsize=9,
+                            fontweight='bold'
+                        )
                 add_chart_border(ax_p)
-                plt.xticks(rotation=30, ha='right')
+                plt.xticks(rotation=40, ha='right', fontsize=9)
                 fig_p.tight_layout()
                 
             st.pyplot(fig_p)
