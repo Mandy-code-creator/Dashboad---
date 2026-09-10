@@ -670,7 +670,7 @@ if uploaded_file is not None:
             yield_summary['Scrap_Rate (%)'] = ((yield_summary['Total_Qty'] - yield_summary['Acceptable_Qty']) / yield_summary['Total_Qty'] * 100).round(2)
             
             yield_summary['_sort'] = yield_summary['Time_Group'].apply(get_sort_key)
-            yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
+            yield_summary = yield_summary.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'], errors='ignore')
 
             st.dataframe(
                 yield_summary.style
@@ -734,7 +734,7 @@ if uploaded_file is not None:
         grade_dist_display['Scrap_Rate'] = grade_dist_display['Scrap_Rate'].fillna(0)
         
         grade_dist_display['_sort'] = grade_dist_display.index.map(get_sort_key)
-        grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'])
+        grade_dist_display = grade_dist_display.sort_values('_sort').drop(columns=['_sort'], errors='ignore')
         
         grade_dist_pct_str = grade_dist_display.copy()
         for col in grade_dist_display.columns:
@@ -1338,7 +1338,7 @@ if uploaded_file is not None:
             trend_data['Rejection_Rate (%)'] = np.where(trend_data['Input_Length'] > 0, (trend_data['Total_Scrap'] / trend_data['Input_Length'] * 100), 0).round(2)
             
             trend_data['_sort'] = trend_data['Time_Group'].apply(get_sort_key)
-            trend_data = trend_data.sort_values('_sort').drop(columns=['_sort'])
+            trend_data = trend_data.sort_values('_sort').drop(columns=['_sort'], errors='ignore')
 
             fig_trend, ax_trend = plt.subplots(figsize=(14, 5))
             if not trend_data.empty:
@@ -1391,7 +1391,7 @@ if uploaded_file is not None:
             scrap_by_period['Scrap_Rate (%)'] = np.where(scrap_by_period['Total_Length'] > 0, (scrap_by_period['Total_Scrap'] / scrap_by_period['Total_Length'] * 100), 0).round(2)
             
             scrap_by_period['_sort'] = scrap_by_period['Time_Group'].apply(get_sort_key)
-            scrap_by_period = scrap_by_period.sort_values('_sort').drop(columns=['_sort'])
+            scrap_by_period = scrap_by_period.sort_values('_sort').drop(columns=['_sort'], errors='ignore')
             
             fig_p, ax_p = plt.subplots(figsize=(12, 4.6))
             if not scrap_by_period.empty:
@@ -1496,7 +1496,7 @@ if uploaded_file is not None:
                 plt.close(fig_m)
 
             scrap_detail['_sort'] = scrap_detail['Time_Group'].apply(get_sort_key)
-            scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'])
+            scrap_detail = scrap_detail.sort_values(by=['_sort', 'Actual_Thickness']).drop(columns=['_sort'], errors='ignore')
             st.dataframe(
                 scrap_detail.style.background_gradient(subset=['Scrap_Rate (%)'], cmap='Oranges')
                 .format({'Actual_Thickness': '{:.2f}', 'Total_Length': '{:,.2f}', 'Total_Scrap': '{:,.2f}', 'Scrap_Rate (%)': '{:.2f}%'}),
@@ -2506,7 +2506,9 @@ if uploaded_file is not None:
             if 'grade_dist_display' in locals() and not grade_dist_display.empty: grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
             if 'cap_summary_rows' in locals() and cap_summary_rows: pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
             if 'plot_df_base' in locals() and not plot_df_base.empty: plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
-            if 'trend_data' in locals() and not trend_data.empty: trend_data.drop(columns=['_sort']).to_excel(writer, sheet_name='Trend_Data', index=False)
+            if 'trend_data' in locals() and not trend_data.empty:
+                trend_export = trend_data.drop(columns=['_sort'], errors='ignore').copy()
+                trend_export.to_excel(writer, sheet_name='Trend_Data', index=False)
             if 'scrap_by_period' in locals() and not scrap_by_period.empty: scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
             if 'scrap_detail' in locals() and not scrap_detail.empty: scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
             if 't7_summary' in locals() and not t7_summary.empty: t7_summary.to_excel(writer, sheet_name='Task7_Production_Stab', index=False)
