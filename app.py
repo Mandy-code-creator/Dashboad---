@@ -11,6 +11,9 @@ from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+from docx.oxml.ns import nsdecls
+from docx.oxml import parse_xml
+from docx.enum.table import WD_ALIGN_VERTICAL
 import tempfile
 import re
 # --- ADD THIS HELPER FUNCTION TO THE TOP OF YOUR FILE ---
@@ -2599,7 +2602,83 @@ if uploaded_file is not None:
         )
 
 
+    def _make_management_rejection_trend_chart():
+        """Reproduce the Tab 5 Rejection Rate Trend chart for the Word report."""
+        if 'trend_data' not in globals() or trend_data.empty:
+            return None
+
+        d = trend_data.copy()
+        if '_sort' in d.columns:
+            d = d.drop(columns=['_sort'], errors='ignore')
+
+        fig_trend, ax_trend = plt.subplots(figsize=(14, 5))
+
+        ax_trend.plot(
+            d['Time_Group'],
+            d['Rejection_Rate (%)'],
+            marker='o',
+            markersize=8,
+            markeredgecolor='white',
+            markeredgewidth=1.5,
+            linestyle='-',
+            color='#1f77b4',
+            linewidth=3,
+            label='Rejection Rate %'
+        )
+        ax_trend.fill_between(
+            d['Time_Group'],
+            d['Rejection_Rate (%)'],
+            color='#1f77b4',
+            alpha=0.1
+        )
+
+        y_max = d['Rejection_Rate (%)'].max()
+        ax_trend.set_ylim(
+            0,
+            y_max * 1.35 + 0.5 if not d.empty else 10
+        )
+        ax_trend.set_title(
+            "Rejection Rate Trend",
+            fontweight='bold',
+            fontsize=15,
+            pad=15,
+            color='#333'
+        )
+        ax_trend.set_ylabel(
+            "Rejection Rate (%)",
+            fontweight='bold',
+            color='#555'
+        )
+
+        # Same rule as the corrected app: do not print repeated 0.00% labels.
+        for i, val in enumerate(d['Rejection_Rate (%)']):
+            if pd.notna(val) and abs(float(val)) > 1e-9:
+                ax_trend.annotate(
+                    f'{val:.2f}%',
+                    xy=(i, val),
+                    xytext=(0, 8),
+                    textcoords="offset points",
+                    ha='center',
+                    va='bottom',
+                    fontsize=9,
+                    fontweight='bold',
+                    color='#222',
+                    bbox=dict(
+                        boxstyle="round,pad=0.25",
+                        fc="white",
+                        ec="none",
+                        alpha=0.85
+                    )
+                )
+
+        add_chart_border(ax_trend)
+        plt.xticks(rotation=45, ha='right', fontsize=9)
+        fig_trend.tight_layout()
+        return fig_trend
+
+
     def _make_management_tail_scrap_chart():
+        """Reproduce the Tab 5 Scrap Rate by Production Period chart."""
         if 'scrap_by_period' not in globals() or scrap_by_period.empty:
             return None
 
@@ -2607,73 +2686,119 @@ if uploaded_file is not None:
         if '_sort' in d.columns:
             d = d.drop(columns=['_sort'], errors='ignore')
 
-        fig, ax = plt.subplots(figsize=(10.5, 4.8))
-        ax.bar(
+        fig_p, ax_p = plt.subplots(figsize=(12, 4.6))
+
+        ax_p.bar(
             d['Time_Group'],
             d['Scrap_Rate (%)'],
+            color='#e74c3c',
+            edgecolor='white'
         )
-        ax.set_title(
+        ax_p.set_title(
             "Tail Scrap Rate (%) by Production Period",
             fontweight='bold'
         )
-        ax.set_ylabel("Scrap Rate (%)")
-        ax.tick_params(
-            axis='x',
-            labelrotation=40,
-            labelsize=8
-        )
-
-        y_max = d['Scrap_Rate (%)'].max() if not d.empty else 0
-        ax.set_ylim(
+        ax_p.set_ylabel("Scrap Rate (%)")
+        ax_p.set_ylim(
             0,
-            y_max * 1.25 + 0.2 if y_max > 0 else 1
+            d['Scrap_Rate (%)'].max() * 1.2 + 0.1
         )
 
-        # Only label non-zero values to avoid overlap.
         for i, val in enumerate(d['Scrap_Rate (%)']):
             if pd.notna(val) and abs(float(val)) > 1e-9:
-                ax.annotate(
+                ax_p.annotate(
                     f"{val:.2f}%",
                     xy=(i, val),
-                    xytext=(0, 5),
+                    xytext=(0, 6),
                     textcoords="offset points",
                     ha='center',
                     va='bottom',
-                    fontsize=8,
-                    fontweight='bold',
+                    fontsize=9,
+                    fontweight='bold'
                 )
 
-        add_chart_border(ax)
-        fig.tight_layout()
-        return fig
+        add_chart_border(ax_p)
+        plt.xticks(rotation=40, ha='right', fontsize=9)
+        fig_p.tight_layout()
+        return fig_p
 
 
-    def _make_management_production_stability_chart():
+    def _make_management_production_stability_charts():
+        """Reproduce the four Tab 7 dual-axis charts used in the app."""
         if 't7_summary' not in globals() or t7_summary.empty:
-            return None
+            return []
 
         d = t7_summary.copy()
-        fig, ax = plt.subplots(figsize=(10.5, 4.8))
-        ax.plot(
-            d['Prod_Month'],
-            d['Scrap_Rate (%)'],
-            marker='o',
-            linewidth=2,
-        )
-        ax.set_title(
-            "Production-Based Scrap Rate Trend",
-            fontweight='bold'
-        )
-        ax.set_xlabel("Production Month")
-        ax.set_ylabel("Scrap Rate (%)")
-        ax.tick_params(
-            axis='x',
-            labelrotation=40,
-            labelsize=8
-        )
-        add_chart_border(ax)
-        fig.tight_layout()
-        return fig
+        features_to_plot = [
+            ('YS', 'Actual YS', '#1f77b4'),
+            ('TS', 'Actual TS', '#2ca02c'),
+            ('EL', 'Actual EL', '#9467bd'),
+            ('YPE', 'Actual YPE', '#ff7f0e'),
+        ]
+
+        figures = []
+
+        for feat_id, label, color in features_to_plot:
+            if feat_id not in d.columns:
+                continue
+
+            fig_t7, ax1 = plt.subplots(figsize=(7, 4.5))
+
+            ax1.set_xlabel('Production Month')
+            ax1.set_ylabel(
+                'Scrap Rate (%)',
+                color='#d62728',
+                fontweight='bold'
+            )
+            ax1.plot(
+                d['Prod_Month'],
+                d['Scrap_Rate (%)'],
+                color='#d62728',
+                marker='o',
+                linewidth=2.5,
+                label='Scrap Rate'
+            )
+            ax1.tick_params(
+                axis='y',
+                labelcolor='#d62728'
+            )
+
+            ax2 = ax1.twinx()
+            ax2.set_ylabel(
+                label,
+                color=color,
+                fontweight='bold'
+            )
+            ax2.plot(
+                d['Prod_Month'],
+                d[feat_id],
+                color=color,
+                marker='s',
+                linestyle='--',
+                alpha=0.8,
+                label=label
+            )
+            ax2.tick_params(
+                axis='y',
+                labelcolor=color
+            )
+
+            plt.title(
+                f"Scrap Rate vs {label}",
+                fontweight='bold'
+            )
+            ax1.set_xticks(range(len(d['Prod_Month'])))
+            ax1.set_xticklabels(
+                d['Prod_Month'],
+                rotation=45,
+                ha='right'
+            )
+            add_chart_border(ax1)
+            fig_t7.tight_layout()
+
+            figures.append((label, fig_t7))
+
+        return figures
 
 
     def _make_imr_report_figure(data, feature, label):
@@ -2807,6 +2932,247 @@ if uploaded_file is not None:
         return fig
 
 
+    def _append_native_matrix_to_doc(doc):
+        """
+        Append the same Production vs Usage matrix structure used by Tab 6:
+        rows = Production period
+        columns = Usage month
+        cell = Scrap %, Coils, Grade %
+        right column = Total Output
+        bottom row = Total Usage
+        """
+        required_names = [
+            'matrix_data',
+            'prod_periods',
+            'usage_months',
+            'matrix_dict',
+            'prod_summary',
+            'usage_summary',
+            'total_matrix_L',
+            'total_matrix_W',
+        ]
+
+        if any(name not in globals() for name in required_names):
+            doc.add_paragraph("No customer end-use matrix data are available.")
+            return
+
+        if matrix_data is None or matrix_data.empty:
+            doc.add_paragraph("No customer end-use matrix data are available.")
+            return
+
+        matrix_grade_cols = [
+            g for g in base_grades
+            if g in matrix_data.columns
+        ]
+
+        def set_cell_background(cell, hex_color):
+            hex_color = str(hex_color).replace("#", "")
+            shading_elm = parse_xml(
+                r'<w:shd {} w:fill="{}"/>'.format(
+                    nsdecls('w'),
+                    hex_color
+                )
+            )
+            cell._tc.get_or_add_tcPr().append(shading_elm)
+
+        # Landscape section for the matrix, matching the dedicated Tab 6 report.
+        current_section = doc.sections[-1]
+        new_section = doc.add_section()
+        new_section.page_width = current_section.page_height
+        new_section.page_height = current_section.page_width
+        new_section.left_margin = Inches(0.35)
+        new_section.right_margin = Inches(0.35)
+        new_section.top_margin = Inches(0.45)
+        new_section.bottom_margin = Inches(0.45)
+
+        cols_count = len(usage_months) + 2
+        table = doc.add_table(
+            rows=1,
+            cols=cols_count
+        )
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = "Production \\ Usage"
+        set_cell_background(hdr_cells[0], "1a3a5c")
+
+        for i, m in enumerate(usage_months):
+            hdr_cells[i + 1].text = str(m)
+            set_cell_background(
+                hdr_cells[i + 1],
+                "1a3a5c"
+            )
+
+        hdr_cells[-1].text = "Total Output\n(生產總量)"
+        set_cell_background(
+            hdr_cells[-1],
+            "1565c0"
+        )
+
+        for cell in hdr_cells:
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            for run in cell.paragraphs[0].runs:
+                run.font.color.rgb = RGBColor(255, 255, 255)
+                run.font.bold = True
+                run.font.size = Pt(7)
+
+        for prod in prod_periods:
+            row_cells = table.add_row().cells
+
+            row_cells[0].text = str(prod)
+            set_cell_background(
+                row_cells[0],
+                "f1f3f5"
+            )
+            row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            for run in row_cells[0].paragraphs[0].runs:
+                run.font.bold = True
+                run.font.size = Pt(7)
+
+            for i, usage in enumerate(usage_months):
+                row = matrix_dict.get((prod, usage))
+                cell = row_cells[i + 1]
+                cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                if not row:
+                    set_cell_background(cell, "fafafa")
+                    run = p.add_run("No Data")
+                    run.font.color.rgb = RGBColor(170, 170, 170)
+                    run.font.size = Pt(6)
+                    continue
+
+                scrap_rate = row.get('Scrap_Rate', 0)
+                total_coils = row.get('Total_Coils', 0)
+
+                set_cell_background(
+                    cell,
+                    get_color(scrap_rate)
+                )
+
+                run_scrap = p.add_run(
+                    f"Scrap: {scrap_rate:.1f}%\n"
+                    f"Coils: {int(total_coils)}\n"
+                )
+                run_scrap.font.bold = True
+                run_scrap.font.size = Pt(6.5)
+
+                cell_total_grade = (
+                    sum(
+                        row.get(g, 0)
+                        for g in matrix_grade_cols
+                    )
+                    if matrix_grade_cols
+                    else 0
+                )
+
+                if cell_total_grade > 0:
+                    for g in matrix_grade_cols:
+                        g_pct = (
+                            row.get(g, 0)
+                            / cell_total_grade
+                            * 100
+                        )
+                        if g_pct <= 0:
+                            continue
+
+                        name_run = p.add_run(f"{g}: ")
+                        name_run.font.size = Pt(5.8)
+
+                        pct_run = p.add_run(
+                            f"{g_pct:.0f}%\n"
+                        )
+                        pct_run.font.size = Pt(5.8)
+                        pct_run.font.bold = True
+                        pct_run.font.color.rgb = (
+                            RGBColor(0, 128, 0)
+                            if "A" in g
+                            else RGBColor(220, 20, 60)
+                        )
+
+            p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
+            p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+
+            cell_out = row_cells[-1]
+            set_cell_background(
+                cell_out,
+                "e3f2fd"
+            )
+            cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+            p_out = cell_out.paragraphs[0]
+            p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            run_out = p_out.add_run(
+                f"L: {p_len:,.0f} m\n"
+                f"W: {p_wt:,.0f} kg"
+            )
+            run_out.font.size = Pt(6)
+            run_out.font.bold = True
+            run_out.font.color.rgb = RGBColor(13, 71, 161)
+
+        # Bottom Total Usage row
+        row_cells = table.add_row().cells
+
+        row_cells[0].text = "Total Usage\n(客戶使用量)"
+        set_cell_background(
+            row_cells[0],
+            "1565c0"
+        )
+        row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        for run in row_cells[0].paragraphs[0].runs:
+            run.font.color.rgb = RGBColor(255, 255, 255)
+            run.font.bold = True
+            run.font.size = Pt(6.5)
+
+        for i, usage in enumerate(usage_months):
+            u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
+            u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
+
+            cell = row_cells[i + 1]
+            set_cell_background(
+                cell,
+                "e3f2fd"
+            )
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            run = p.add_run(
+                f"L: {u_len:,.0f} m\n"
+                f"W: {u_wt:,.0f} kg"
+            )
+            run.font.size = Pt(6)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor(13, 71, 161)
+
+        cell_grand = row_cells[-1]
+        set_cell_background(
+            cell_grand,
+            "bbdefb"
+        )
+        cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+        p_grand = cell_grand.paragraphs[0]
+        p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        run_grand = p_grand.add_run(
+            f"Total L: {total_matrix_L:,.0f} m\n"
+            f"Total W: {total_matrix_W:,.0f} kg"
+        )
+        run_grand.font.size = Pt(6.5)
+        run_grand.font.bold = True
+        run_grand.font.color.rgb = RGBColor(183, 28, 28)
+
+
     def build_full_management_report():
         doc = Document()
 
@@ -2922,8 +3288,18 @@ if uploaded_file is not None:
             level=1
         )
 
+        rejection_trend_fig = _make_management_rejection_trend_chart()
+        if rejection_trend_fig is not None:
+            doc.add_paragraph("Rejection Rate Trend").runs[0].bold = True
+            _doc_add_figure(
+                doc,
+                rejection_trend_fig,
+                width=6.8
+            )
+
         tail_fig = _make_management_tail_scrap_chart()
         if tail_fig is not None:
+            doc.add_paragraph("Scrap Rate by Production Period").runs[0].bold = True
             _doc_add_figure(
                 doc,
                 tail_fig,
@@ -2977,33 +3353,7 @@ if uploaded_file is not None:
             "production timing and customer use."
         )
 
-        if 'matrix_data' in globals() and not matrix_data.empty:
-            matrix_report = matrix_data.copy()
-
-            preferred_cols = [
-                'Production_Group',
-                'Usage_Month',
-                'Total_Coils',
-                'Total_Length',
-                'Total_Scrap',
-                'Scrap_Rate',
-            ] + [
-                g for g in base_grades
-                if g in matrix_report.columns
-            ]
-
-            _doc_add_table(
-                doc,
-                matrix_report,
-                columns=preferred_cols,
-                max_rows=35,
-                float_digits=2,
-                font_size=6.5,
-            )
-        else:
-            doc.add_paragraph(
-                "No customer end-use matrix data are available."
-            )
+        _append_native_matrix_to_doc(doc)
 
         # ======================================================
         # 5. PRODUCTION STABILITY
@@ -3013,12 +3363,15 @@ if uploaded_file is not None:
             level=1
         )
 
-        prod_fig = _make_management_production_stability_chart()
-        if prod_fig is not None:
+        prod_figures = _make_management_production_stability_charts()
+        for label, prod_fig in prod_figures:
+            doc.add_paragraph(
+                f"Scrap Rate vs {label}"
+            ).runs[0].bold = True
             _doc_add_figure(
                 doc,
                 prod_fig,
-                width=6.8
+                width=6.4
             )
 
         if 't7_summary' in globals() and not t7_summary.empty:
