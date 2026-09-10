@@ -9,6 +9,8 @@ import streamlit.components.v1 as components
 from PIL import Image
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
 import tempfile
 import re
 # --- ADD THIS HELPER FUNCTION TO THE TOP OF YOUR FILE ---
