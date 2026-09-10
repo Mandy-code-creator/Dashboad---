@@ -1094,18 +1094,242 @@ if uploaded_file is not None:
         st.header("5. Tail Scrap & Length Rejection Analysis")
         COIL_ID_COL = '鋼捲號碼'
 
-        if LEN_COL in df.columns and SCRAP_COL in df.columns:
-            df_t5 = df.copy()
-            df_t5[COIL_ID_COL] = df_t5[COIL_ID_COL].astype(str).str.strip().replace(['nan', 'None', '', 'NaN'], np.nan)
-            
+        # Tail Scrap uses the ORIGINAL uploaded dataset.
+        # This prevents recent months from being removed by the SPC thickness filter.
+        if LEN_COL in df_source_all.columns and SCRAP_COL in df_source_all.columns:
+            df_t5 = df_source_all.copy()
+
+            # ------------------------------------------------------
+            # A. Rebuild Production Date / Production Month locally
+            # ------------------------------------------------------
+            if '烤三生產日期' in df_t5.columns:
+                prod_raw_t5 = _clean_date_string(df_t5['烤三生產日期'])
+                prod_date_t5 = pd.to_datetime(
+                    prod_raw_t5,
+                    format='%Y%m%d',
+                    errors='coerce'
+                )
+
+                missing_t5 = prod_date_t5.isna() & prod_raw_t5.notna()
+                if missing_t5.any():
+                    prod_date_t5.loc[missing_t5] = pd.to_datetime(
+                        prod_raw_t5.loc[missing_t5],
+                        errors='coerce'
+                    )
+            else:
+                prod_date_t5 = pd.Series(
+                    pd.NaT,
+                    index=df_t5.index,
+                    dtype='datetime64[ns]'
+                )
+
+            # Fallback: 年度 + 月份
+            if '年度' in df_t5.columns and '月份' in df_t5.columns:
+                prod_year_t5 = pd.to_numeric(
+                    _clean_date_string(df_t5['年度']),
+                    errors='coerce'
+                )
+                prod_month_t5 = _parse_month_value(df_t5['月份'])
+
+                fallback_prod_t5 = pd.to_datetime(
+                    pd.DataFrame({
+                        'year': prod_year_t5,
+                        'month': prod_month_t5,
+                        'day': 1
+                    }),
+                    errors='coerce'
+                )
+
+                prod_date_t5 = prod_date_t5.fillna(fallback_prod_t5)
+
+            df_t5['Production_Date'] = prod_date_t5
+            df_t5['Time_Group'] = df_t5['Production_Date'].apply(categorize_period)
+
+            df_t5 = df_t5[
+                ~df_t5['Time_Group'].isin(['Other', 'Unknown'])
+            ].copy()
+
+            # ------------------------------------------------------
+            # B. Coil / Length / Scrap cleanup
+            # ------------------------------------------------------
+            df_t5[COIL_ID_COL] = (
+                df_t5[COIL_ID_COL]
+                .astype(str)
+                .str.strip()
+                .str.upper()
+                .str.replace(r'\.0$', '', regex=True)
+                .replace({
+                    'nan': np.nan,
+                    'NaN': np.nan,
+                    'NAN': np.nan,
+                    'None': np.nan,
+                    'NONE': np.nan,
+                    '': np.nan
+                })
+            )
+
             missing_mask = df_t5[COIL_ID_COL].isna()
             if missing_mask.any():
-                df_t5.loc[missing_mask, COIL_ID_COL] = [f"UNKNOWN_{i}" for i in df_t5[missing_mask].index]
+                df_t5.loc[missing_mask, COIL_ID_COL] = [
+                    f"UNKNOWN_{i}" for i in df_t5[missing_mask].index
+                ]
 
-            scrap_totals = df_t5.groupby(['Time_Group', COIL_ID_COL])[SCRAP_COL].sum().reset_index()
-            first_occurrence = df_t5.sort_values(['Time_Group', 'Production_Date']).drop_duplicates(subset=['Time_Group', COIL_ID_COL], keep='first')
-            
-            df_scrap_master = first_occurrence[['Time_Group', COIL_ID_COL, LEN_COL, 'Actual_Thickness', 'HR_Material', 'Production_Date']].merge(scrap_totals, on=[COIL_ID_COL, 'Time_Group'])
+            df_t5[LEN_COL] = pd.to_numeric(
+                df_t5[LEN_COL], errors='coerce'
+            ).fillna(0)
+
+            df_t5[SCRAP_COL] = pd.to_numeric(
+                df_t5[SCRAP_COL], errors='coerce'
+            ).fillna(0)
+
+            # Keep Tail Scrap rows even when grade quantity is zero,
+            # provided the row has physical length or scrap.
+            df_t5 = df_t5[
+                (df_t5[LEN_COL] > 0) | (df_t5[SCRAP_COL] > 0)
+            ].copy()
+
+            # ------------------------------------------------------
+            # C. Rebuild material locally
+            # ------------------------------------------------------
+            if '熱軋材質' in df_t5.columns:
+                df_t5['HR_Material'] = (
+                    df_t5['熱軋材質']
+                    .astype(str)
+                    .str.strip()
+                    .replace(['nan', 'NaN', 'None', ''], 'Unknown')
+                )
+            else:
+                df_t5['HR_Material'] = 'Unknown'
+
+            # ------------------------------------------------------
+            # D. Rebuild thickness locally.
+            # Unlike SPC, DO NOT DROP values outside 0.5/0.6/0.8.
+            # ------------------------------------------------------
+            if 'Actual_Thickness' in df_t5.columns:
+                raw_thick_t5 = pd.to_numeric(
+                    df_t5['Actual_Thickness'], errors='coerce'
+                )
+            elif 'Thickness' in df_t5.columns:
+                raw_thick_t5 = pd.to_numeric(
+                    df_t5['Thickness'], errors='coerce'
+                )
+            elif '厚度' in df_t5.columns:
+                raw_thick_t5 = pd.to_numeric(
+                    df_t5['厚度'], errors='coerce'
+                )
+            else:
+                detected_thickness_col = None
+                for i, c in enumerate(df_t5.columns):
+                    if '型式' in str(c) and i > 0:
+                        detected_thickness_col = df_t5.columns[i - 1]
+                        break
+
+                if detected_thickness_col is not None:
+                    raw_thick_t5 = pd.to_numeric(
+                        df_t5[detected_thickness_col],
+                        errors='coerce'
+                    )
+                else:
+                    raw_thick_t5 = pd.Series(np.nan, index=df_t5.index)
+
+            def map_thickness_t5(val):
+                if pd.isna(val):
+                    return np.nan
+
+                v = round(float(val), 2)
+
+                if v in [0.47, 0.50]:
+                    return 0.5
+                if v in [0.53, 0.54, 0.57, 0.58, 0.60]:
+                    return 0.6
+                if v in [0.63, 0.75, 0.76, 0.77, 0.80]:
+                    return 0.8
+
+                # Preserve all other valid thicknesses for Tail Scrap.
+                return v
+
+            df_t5['Actual_Thickness'] = raw_thick_t5.apply(map_thickness_t5)
+
+            # ------------------------------------------------------
+            # E. One physical coil per production period
+            # ------------------------------------------------------
+            scrap_totals = (
+                df_t5
+                .groupby(['Time_Group', COIL_ID_COL], as_index=False)[SCRAP_COL]
+                .sum()
+            )
+
+            first_occurrence = (
+                df_t5
+                .sort_values(['Time_Group', 'Production_Date', COIL_ID_COL])
+                .drop_duplicates(
+                    subset=['Time_Group', COIL_ID_COL],
+                    keep='first'
+                )
+            )
+
+            df_scrap_master = (
+                first_occurrence[
+                    [
+                        'Time_Group',
+                        COIL_ID_COL,
+                        LEN_COL,
+                        'Actual_Thickness',
+                        'HR_Material',
+                        'Production_Date'
+                    ]
+                ]
+                .merge(
+                    scrap_totals,
+                    on=[COIL_ID_COL, 'Time_Group'],
+                    how='left'
+                )
+            )
+
+            # ------------------------------------------------------
+            # F. Visible audit so new months can be verified immediately
+            # ------------------------------------------------------
+            recognized_t5_months = sorted(
+                df_scrap_master['Time_Group']
+                .dropna()
+                .unique()
+                .tolist(),
+                key=get_sort_key
+            )
+
+            st.caption(
+                "Tail Scrap recognized production periods: "
+                + (
+                    ", ".join(recognized_t5_months)
+                    if recognized_t5_months
+                    else "None"
+                )
+            )
+
+            with st.expander(
+                "🔎 Tail Scrap Production-Time Audit",
+                expanded=False
+            ):
+                audit_t5 = (
+                    df_scrap_master[
+                        [
+                            COIL_ID_COL,
+                            'Production_Date',
+                            'Time_Group',
+                            LEN_COL,
+                            SCRAP_COL,
+                            'Actual_Thickness',
+                            'HR_Material'
+                        ]
+                    ]
+                    .sort_values(['Production_Date', COIL_ID_COL])
+                )
+
+                st.dataframe(
+                    audit_t5,
+                    use_container_width=True,
+                    hide_index=True
+                )
 
             # --- 1. HYBRID TREND LINE ---
             st.subheader("Rejection Rate Trend (%)")
@@ -1132,7 +1356,7 @@ if uploaded_file is not None:
                     ax_trend.annotate(f'{val:.2f}%', xy=(i, val), xytext=(0, 8), textcoords="offset points", ha='center', va='bottom', fontsize=10, fontweight='bold', color='#222',
                                       bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.8))
                 add_chart_border(ax_trend)
-                plt.xticks(rotation=40, ha='right', fontsize=10)
+                plt.xticks(rotation=45, ha='right', fontsize=9)
                 fig_trend.tight_layout()
                 
             st.pyplot(fig_trend)
