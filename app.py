@@ -8,7 +8,7 @@ import seaborn as sns
 import streamlit.components.v1 as components
 from PIL import Image
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt, RGBColor
 import tempfile
 import re
 # --- ADD THIS HELPER FUNCTION TO THE TOP OF YOUR FILE ---
@@ -2497,25 +2497,799 @@ if uploaded_file is not None:
             t7_summary.style.format({'Input_Length': '{:,.1f}', 'Total_Scrap': '{:,.1f}', 'Scrap_Rate (%)': '{:.2f}%', 'YS': '{:.1f}', 'TS': '{:.1f}', 'EL': '{:.2f}', 'YPE': '{:.2f}'}), use_container_width=True
         )
             
-    # --- GLOBAL EXPORT ---
+    # ==========================================================
+    # GLOBAL EXPORT
+    # ==========================================================
     st.sidebar.header("Export Reports")
-    if st.sidebar.button("Generate Excel File"):
+
+    # ==========================================================
+    # A. FULL MANAGEMENT REPORT (.docx)
+    # Report structure:
+    #   1. Executive Summary
+    #   2. Quality Yield
+    #   3. Tail Scrap
+    #   4. Customer End-Use Matrix
+    #   5. Production Stability
+    #   6. Key Conclusions & Actions
+    #   7. I-MR Tracking  <-- intentionally placed LAST
+    #
+    # SPC / Capability is intentionally EXCLUDED from this Word report.
+    # ==========================================================
+
+    def _doc_add_table(
+        doc,
+        data,
+        columns=None,
+        max_rows=25,
+        float_digits=2,
+        font_size=7,
+    ):
+        if data is None:
+            doc.add_paragraph("No data available.")
+            return
+
+        out = data.copy()
+        if isinstance(out, pd.Series):
+            out = out.reset_index()
+
+        if out.empty:
+            doc.add_paragraph("No data available.")
+            return
+
+        if columns is not None:
+            columns = [c for c in columns if c in out.columns]
+            out = out[columns]
+
+        out = out.head(max_rows).copy()
+
+        table = doc.add_table(
+            rows=1,
+            cols=len(out.columns),
+        )
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+        for j, col in enumerate(out.columns):
+            cell = table.rows[0].cells[j]
+            cell.text = str(col)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in p.runs:
+                run.font.bold = True
+                run.font.size = Pt(font_size)
+
+        for _, row in out.iterrows():
+            cells = table.add_row().cells
+            for j, col in enumerate(out.columns):
+                value = row[col]
+
+                if pd.isna(value):
+                    shown = ""
+                elif isinstance(value, (float, np.floating)):
+                    shown = f"{float(value):.{float_digits}f}"
+                else:
+                    shown = str(value)
+
+                cells[j].text = shown
+                cells[j].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+                p = cells[j].paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in p.runs:
+                    run.font.size = Pt(font_size)
+
+        return table
+
+
+    def _doc_add_figure(doc, fig, width=6.7):
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=220,
+            bbox_inches="tight",
+        )
+        buf.seek(0)
+        plt.close(fig)
+        doc.add_picture(
+            buf,
+            width=Inches(width),
+        )
+
+
+    def _make_management_tail_scrap_chart():
+        if 'scrap_by_period' not in locals() or scrap_by_period.empty:
+            return None
+
+        d = scrap_by_period.copy()
+        if '_sort' in d.columns:
+            d = d.drop(columns=['_sort'], errors='ignore')
+
+        fig, ax = plt.subplots(figsize=(10.5, 4.8))
+        ax.bar(
+            d['Time_Group'],
+            d['Scrap_Rate (%)'],
+        )
+        ax.set_title(
+            "Tail Scrap Rate (%) by Production Period",
+            fontweight='bold'
+        )
+        ax.set_ylabel("Scrap Rate (%)")
+        ax.tick_params(
+            axis='x',
+            labelrotation=40,
+            labelsize=8
+        )
+
+        y_max = d['Scrap_Rate (%)'].max() if not d.empty else 0
+        ax.set_ylim(
+            0,
+            y_max * 1.25 + 0.2 if y_max > 0 else 1
+        )
+
+        # Only label non-zero values to avoid overlap.
+        for i, val in enumerate(d['Scrap_Rate (%)']):
+            if pd.notna(val) and abs(float(val)) > 1e-9:
+                ax.annotate(
+                    f"{val:.2f}%",
+                    xy=(i, val),
+                    xytext=(0, 5),
+                    textcoords="offset points",
+                    ha='center',
+                    va='bottom',
+                    fontsize=8,
+                    fontweight='bold',
+                )
+
+        add_chart_border(ax)
+        fig.tight_layout()
+        return fig
+
+
+    def _make_management_production_stability_chart():
+        if 't7_summary' not in locals() or t7_summary.empty:
+            return None
+
+        d = t7_summary.copy()
+        fig, ax = plt.subplots(figsize=(10.5, 4.8))
+        ax.plot(
+            d['Prod_Month'],
+            d['Scrap_Rate (%)'],
+            marker='o',
+            linewidth=2,
+        )
+        ax.set_title(
+            "Production-Based Scrap Rate Trend",
+            fontweight='bold'
+        )
+        ax.set_xlabel("Production Month")
+        ax.set_ylabel("Scrap Rate (%)")
+        ax.tick_params(
+            axis='x',
+            labelrotation=40,
+            labelsize=8
+        )
+        add_chart_border(ax)
+        fig.tight_layout()
+        return fig
+
+
+    def _make_imr_report_figure(data, feature, label):
+        if data is None or data.empty or feature not in data.columns:
+            return None
+
+        d = (
+            data[['Production_Date', feature]]
+            .dropna()
+            .sort_values('Production_Date')
+            .copy()
+        )
+
+        d[feature] = pd.to_numeric(
+            d[feature],
+            errors='coerce'
+        )
+        d = d.dropna(subset=[feature])
+
+        if len(d) < 2:
+            return None
+
+        vals = d[feature].to_numpy(dtype=float)
+        mr = np.abs(np.diff(vals))
+
+        if len(mr) == 0:
+            return None
+
+        mean_v = np.mean(vals)
+        mr_mean = np.mean(mr)
+
+        ucl_i = mean_v + 2.66 * mr_mean
+        lcl_i = mean_v - 2.66 * mr_mean
+        ucl_mr = 3.267 * mr_mean
+
+        fig, (ax_i, ax_mr) = plt.subplots(
+            2,
+            1,
+            figsize=(10.5, 6.5),
+            gridspec_kw={'height_ratios': [2, 1]}
+        )
+
+        ax_i.plot(
+            range(len(vals)),
+            vals,
+            marker='o',
+            linewidth=1.3,
+        )
+        ax_i.axhline(
+            mean_v,
+            linestyle='--',
+            label=f"Mean: {mean_v:.2f}"
+        )
+        ax_i.axhline(
+            ucl_i,
+            linestyle='--',
+            label=f"UCL: {ucl_i:.2f}"
+        )
+        ax_i.axhline(
+            lcl_i,
+            linestyle='--',
+            label=f"LCL: {lcl_i:.2f}"
+        )
+        ax_i.set_title(
+            f"I-MR Tracking - {label}",
+            fontweight='bold'
+        )
+        ax_i.set_ylabel(label)
+        ax_i.legend(
+            loc='best',
+            fontsize=8
+        )
+        add_chart_border(ax_i)
+
+        ax_mr.plot(
+            range(1, len(vals)),
+            mr,
+            marker='o',
+            linewidth=1.3,
+        )
+        ax_mr.axhline(
+            mr_mean,
+            linestyle='--',
+            label=f"MR Mean: {mr_mean:.2f}"
+        )
+        ax_mr.axhline(
+            ucl_mr,
+            linestyle='--',
+            label=f"UCL: {ucl_mr:.2f}"
+        )
+        ax_mr.set_ylabel("Moving Range")
+        ax_mr.legend(
+            loc='best',
+            fontsize=8
+        )
+        add_chart_border(ax_mr)
+
+        month_labels = (
+            d['Production_Date']
+            .dt.strftime('%Y-%m')
+            .reset_index(drop=True)
+        )
+        month_start_idx = np.where(
+            month_labels.ne(month_labels.shift())
+        )[0]
+
+        ax_mr.set_xticks(month_start_idx)
+        ax_mr.set_xticklabels(
+            month_labels.iloc[month_start_idx],
+            rotation=35,
+            ha='right',
+            fontsize=8
+        )
+
+        for pos in month_start_idx[1:]:
+            x = pos - 0.5
+            ax_i.axvline(
+                x,
+                linestyle=':',
+                linewidth=0.8,
+                alpha=0.6
+            )
+            ax_mr.axvline(
+                x,
+                linestyle=':',
+                linewidth=0.8,
+                alpha=0.6
+            )
+
+        fig.tight_layout()
+        return fig
+
+
+    def build_full_management_report():
+        doc = Document()
+
+        # Base document style
+        styles = doc.styles
+        styles['Normal'].font.name = 'Arial'
+        styles['Normal'].font.size = Pt(9)
+
+        title = doc.add_paragraph()
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = title.add_run(
+            "Production Quality & Scrap Management Report"
+        )
+        r.bold = True
+        r.font.size = Pt(18)
+
+        subtitle = doc.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = subtitle.add_run(
+            "Management Summary generated from the current dashboard dataset"
+        )
+        r.italic = True
+        r.font.size = Pt(9)
+
+        # ======================================================
+        # 1. EXECUTIVE SUMMARY
+        # ======================================================
+        doc.add_heading(
+            "1. Executive Summary",
+            level=1
+        )
+
+        if 'Production_Date' in df.columns and df['Production_Date'].notna().any():
+            start_date = df['Production_Date'].min().strftime('%Y-%m-%d')
+            end_date = df['Production_Date'].max().strftime('%Y-%m-%d')
+            doc.add_paragraph(
+                f"Production period covered: {start_date} to {end_date}."
+            )
+
+        if 'yield_summary' in locals() and not yield_summary.empty:
+            total_qty = float(
+                yield_summary['Total_Qty'].sum()
+            )
+            acceptable_qty = float(
+                yield_summary['Acceptable_Qty'].sum()
+            )
+            overall_yield = (
+                acceptable_qty / total_qty * 100
+                if total_qty > 0
+                else 0
+            )
+            doc.add_paragraph(
+                f"Overall quality yield: {overall_yield:.2f}% "
+                f"({acceptable_qty:,.0f} acceptable / {total_qty:,.0f} total)."
+            )
+
+        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+            latest_scrap = (
+                scrap_by_period
+                .sort_values(
+                    'Time_Group',
+                    key=lambda s: s.map(get_sort_key)
+                )
+                .iloc[-1]
+            )
+            doc.add_paragraph(
+                f"Latest production-period tail scrap rate: "
+                f"{latest_scrap['Scrap_Rate (%)']:.2f}% "
+                f"({latest_scrap['Time_Group']})."
+            )
+
+        doc.add_paragraph(
+            "This management report intentionally excludes SPC capability detail. "
+            "I-MR monitoring is presented at the end as the post-control tracking section."
+        )
+
+        # ======================================================
+        # 2. QUALITY YIELD
+        # ======================================================
+        doc.add_heading(
+            "2. Quality Yield",
+            level=1
+        )
+
+        if 'yield_summary' in locals() and not yield_summary.empty:
+            yield_report = yield_summary.copy()
+            _doc_add_table(
+                doc,
+                yield_report,
+                columns=[
+                    'Time_Group',
+                    'Actual_Thickness',
+                    'HR_Material',
+                    'Total_Qty',
+                    'Yield (%)',
+                    'Defect_Rate (%)',
+                    'Scrap_Rate (%)',
+                ],
+                max_rows=30,
+                float_digits=2,
+                font_size=7,
+            )
+        else:
+            doc.add_paragraph(
+                "No quality-yield summary is available."
+            )
+
+        # ======================================================
+        # 3. TAIL SCRAP
+        # ======================================================
+        doc.add_heading(
+            "3. Tail Scrap",
+            level=1
+        )
+
+        tail_fig = _make_management_tail_scrap_chart()
+        if tail_fig is not None:
+            _doc_add_figure(
+                doc,
+                tail_fig,
+                width=6.8
+            )
+
+        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+            _doc_add_table(
+                doc,
+                scrap_by_period.drop(
+                    columns=['_sort'],
+                    errors='ignore'
+                ),
+                columns=[
+                    'Time_Group',
+                    'Total_Length',
+                    'Total_Scrap',
+                    'Coil_Count',
+                    'Scrap_Rate (%)',
+                ],
+                max_rows=30,
+                float_digits=2,
+                font_size=7,
+            )
+
+            worst_scrap = (
+                scrap_by_period
+                .sort_values(
+                    'Scrap_Rate (%)',
+                    ascending=False
+                )
+                .iloc[0]
+            )
+            doc.add_paragraph(
+                f"Highest observed tail scrap rate: "
+                f"{worst_scrap['Scrap_Rate (%)']:.2f}% "
+                f"in {worst_scrap['Time_Group']}."
+            )
+
+        # ======================================================
+        # 4. CUSTOMER END-USE MATRIX
+        # ======================================================
+        doc.add_heading(
+            "4. Customer End-Use Matrix",
+            level=1
+        )
+
+        doc.add_paragraph(
+            "Matrix logic: rows represent production period and columns represent "
+            "customer usage month. This section supports traceability between "
+            "production timing and customer use."
+        )
+
+        if 'matrix_data' in locals() and not matrix_data.empty:
+            matrix_report = matrix_data.copy()
+
+            preferred_cols = [
+                'Production_Group',
+                'Usage_Month',
+                'Total_Coils',
+                'Total_Length',
+                'Total_Scrap',
+                'Scrap_Rate',
+            ] + [
+                g for g in base_grades
+                if g in matrix_report.columns
+            ]
+
+            _doc_add_table(
+                doc,
+                matrix_report,
+                columns=preferred_cols,
+                max_rows=35,
+                float_digits=2,
+                font_size=6.5,
+            )
+        else:
+            doc.add_paragraph(
+                "No customer end-use matrix data are available."
+            )
+
+        # ======================================================
+        # 5. PRODUCTION STABILITY
+        # ======================================================
+        doc.add_heading(
+            "5. Production Stability",
+            level=1
+        )
+
+        prod_fig = _make_management_production_stability_chart()
+        if prod_fig is not None:
+            _doc_add_figure(
+                doc,
+                prod_fig,
+                width=6.8
+            )
+
+        if 't7_summary' in locals() and not t7_summary.empty:
+            _doc_add_table(
+                doc,
+                t7_summary,
+                columns=[
+                    'Prod_Month',
+                    'Input_Length',
+                    'Total_Scrap',
+                    'Scrap_Rate (%)',
+                    'YS',
+                    'TS',
+                    'EL',
+                    'YPE',
+                ],
+                max_rows=30,
+                float_digits=2,
+                font_size=7,
+            )
+
+        # ======================================================
+        # 6. KEY CONCLUSIONS & ACTIONS
+        # ======================================================
+        doc.add_heading(
+            "6. Key Conclusions & Recommended Actions",
+            level=1
+        )
+
+        actions = []
+
+        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+            nonzero = scrap_by_period[
+                scrap_by_period['Scrap_Rate (%)'] > 0
+            ]
+            if not nonzero.empty:
+                worst = nonzero.sort_values(
+                    'Scrap_Rate (%)',
+                    ascending=False
+                ).iloc[0]
+                actions.append(
+                    f"Prioritize review of {worst['Time_Group']}, "
+                    f"which has the highest observed tail scrap rate "
+                    f"({worst['Scrap_Rate (%)']:.2f}%)."
+                )
+
+        if 't7_summary' in locals() and not t7_summary.empty:
+            actions.append(
+                "Compare scrap changes against YS / TS / EL / YPE stability "
+                "before attributing customer-end failure to material."
+            )
+
+        if 'matrix_data' in locals() and not matrix_data.empty:
+            actions.append(
+                "Use the Production-vs-Usage matrix to trace whether high-scrap "
+                "events are concentrated in specific production periods, usage months, "
+                "or machine-transition windows."
+            )
+
+        actions.append(
+            "After corrective action, use I-MR monitoring to confirm whether the "
+            "process remains stable over time."
+        )
+
+        for item in actions:
+            p = doc.add_paragraph(
+                style='List Bullet'
+            )
+            p.add_run(item)
+
+        # ======================================================
+        # 7. I-MR TRACKING -- LAST SECTION
+        # ======================================================
+        doc.add_heading(
+            "7. I-MR Tracking (Post-Control Monitoring)",
+            level=1
+        )
+
+        doc.add_paragraph(
+            "I-MR is placed at the end because it is used to verify ongoing "
+            "process stability after corrective actions or process-control decisions."
+        )
+
+        imr_source = df[
+            df['Production_Date'].dt.year >= 2026
+        ].copy()
+
+        if 'Valid_Qty' in imr_source.columns:
+            imr_source = imr_source[
+                imr_source['Valid_Qty'] > 0
+            ].copy()
+
+        imr_features = [
+            ('YS', 'Yield Strength'),
+            ('TS', 'Tensile Strength'),
+            ('EL', 'Elongation'),
+            ('YPE', 'YPE'),
+        ]
+
+        imr_count = 0
+
+        for feature, label in imr_features:
+            if feature not in imr_source.columns:
+                continue
+
+            fig = _make_imr_report_figure(
+                imr_source,
+                feature,
+                label
+            )
+
+            if fig is not None:
+                doc.add_paragraph(
+                    label,
+                    style=None
+                ).runs[0].bold = True
+
+                _doc_add_figure(
+                    doc,
+                    fig,
+                    width=6.8
+                )
+                imr_count += 1
+
+        if imr_count == 0:
+            doc.add_paragraph(
+                "Insufficient 2026+ data for I-MR chart generation."
+            )
+
+        report_buffer = io.BytesIO()
+        doc.save(report_buffer)
+        report_buffer.seek(0)
+        return report_buffer
+
+
+    if st.sidebar.button(
+        "Generate Full Management Report (.docx)",
+        key="generate_management_word"
+    ):
+        try:
+            management_report = build_full_management_report()
+
+            st.sidebar.download_button(
+                label="📄 Download Full Management Report",
+                data=management_report.getvalue(),
+                file_name="Quality_Scrap_Management_Report.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key="download_management_word",
+            )
+
+            st.sidebar.success(
+                "Management report generated. SPC is excluded and I-MR is the final section."
+            )
+        except Exception as e:
+            st.sidebar.error(
+                f"Could not generate management report: {e}"
+            )
+
+    # ==========================================================
+    # B. FULL EXCEL DATA EXPORT
+    # Keep technical data sheets for internal analysis.
+    # SPC sheet remains available in Excel, although it is excluded
+    # from the management Word report.
+    # ==========================================================
+    if st.sidebar.button(
+        "Generate Excel File",
+        key="generate_excel"
+    ):
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            if not yield_summary.empty: yield_summary.to_excel(writer, sheet_name='Yield_Detailed', index=False)
-            if 'grade_dist_display' in locals() and not grade_dist_display.empty: grade_dist_display.to_excel(writer, sheet_name='Grade_Distribution')
-            if 'cap_summary_rows' in locals() and cap_summary_rows: pd.DataFrame(cap_summary_rows).to_excel(writer, sheet_name='Capability_Log', index=False)
-            if 'plot_df_base' in locals() and not plot_df_base.empty: plot_df_base.to_excel(writer, sheet_name='Task4_IMR_Data', index=False)
-            if 'trend_data' in locals() and not trend_data.empty:
-                trend_export = trend_data.drop(columns=['_sort'], errors='ignore').copy()
-                trend_export.to_excel(writer, sheet_name='Trend_Data', index=False)
-            if 'scrap_by_period' in locals() and not scrap_by_period.empty: scrap_by_period.to_excel(writer, sheet_name='Scrap_By_Period', index=False)
-            if 'scrap_detail' in locals() and not scrap_detail.empty: scrap_detail.to_excel(writer, sheet_name='Scrap_Detailed', index=False)
-            if 't7_summary' in locals() and not t7_summary.empty: t7_summary.to_excel(writer, sheet_name='Task7_Production_Stab', index=False)
-        
+
+        with pd.ExcelWriter(
+            output,
+            engine='xlsxwriter'
+        ) as writer:
+
+            if 'yield_summary' in locals() and not yield_summary.empty:
+                yield_summary.to_excel(
+                    writer,
+                    sheet_name='Yield_Detailed',
+                    index=False
+                )
+
+            if (
+                'grade_dist_display' in locals()
+                and not grade_dist_display.empty
+            ):
+                grade_dist_display.to_excel(
+                    writer,
+                    sheet_name='Grade_Distribution'
+                )
+
+            # Technical SPC remains in Excel only.
+            if (
+                'cap_summary_rows' in locals()
+                and cap_summary_rows
+            ):
+                pd.DataFrame(
+                    cap_summary_rows
+                ).to_excel(
+                    writer,
+                    sheet_name='Capability_Log',
+                    index=False
+                )
+
+            if (
+                'plot_df_base' in locals()
+                and not plot_df_base.empty
+            ):
+                plot_df_base.to_excel(
+                    writer,
+                    sheet_name='Task4_IMR_Data',
+                    index=False
+                )
+
+            if (
+                'trend_data' in locals()
+                and not trend_data.empty
+            ):
+                trend_export = trend_data.drop(
+                    columns=['_sort'],
+                    errors='ignore'
+                ).copy()
+
+                trend_export.to_excel(
+                    writer,
+                    sheet_name='Trend_Data',
+                    index=False
+                )
+
+            if (
+                'scrap_by_period' in locals()
+                and not scrap_by_period.empty
+            ):
+                scrap_by_period.to_excel(
+                    writer,
+                    sheet_name='Scrap_By_Period',
+                    index=False
+                )
+
+            if (
+                'scrap_detail' in locals()
+                and not scrap_detail.empty
+            ):
+                scrap_detail.to_excel(
+                    writer,
+                    sheet_name='Scrap_Detailed',
+                    index=False
+                )
+
+            if (
+                'matrix_data' in locals()
+                and not matrix_data.empty
+            ):
+                matrix_data.to_excel(
+                    writer,
+                    sheet_name='Customer_EndUse_Matrix',
+                    index=False
+                )
+
+            if (
+                't7_summary' in locals()
+                and not t7_summary.empty
+            ):
+                t7_summary.to_excel(
+                    writer,
+                    sheet_name='Task7_Production_Stab',
+                    index=False
+                )
+
         st.sidebar.download_button(
             label="📥 Download Full Excel",
             data=output.getvalue(),
             file_name="Quality_Scrap_Deep_Analysis.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_full_excel",
         )
