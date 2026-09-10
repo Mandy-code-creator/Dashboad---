@@ -2600,7 +2600,7 @@ if uploaded_file is not None:
 
 
     def _make_management_tail_scrap_chart():
-        if 'scrap_by_period' not in locals() or scrap_by_period.empty:
+        if 'scrap_by_period' not in globals() or scrap_by_period.empty:
             return None
 
         d = scrap_by_period.copy()
@@ -2649,7 +2649,7 @@ if uploaded_file is not None:
 
 
     def _make_management_production_stability_chart():
-        if 't7_summary' not in locals() or t7_summary.empty:
+        if 't7_summary' not in globals() or t7_summary.empty:
             return None
 
         d = t7_summary.copy()
@@ -2846,7 +2846,7 @@ if uploaded_file is not None:
                 f"Production period covered: {start_date} to {end_date}."
             )
 
-        if 'yield_summary' in locals() and not yield_summary.empty:
+        if 'yield_summary' in globals() and not yield_summary.empty:
             total_qty = float(
                 yield_summary['Total_Qty'].sum()
             )
@@ -2863,7 +2863,7 @@ if uploaded_file is not None:
                 f"({acceptable_qty:,.0f} acceptable / {total_qty:,.0f} total)."
             )
 
-        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+        if 'scrap_by_period' in globals() and not scrap_by_period.empty:
             latest_scrap = (
                 scrap_by_period
                 .sort_values(
@@ -2891,7 +2891,7 @@ if uploaded_file is not None:
             level=1
         )
 
-        if 'yield_summary' in locals() and not yield_summary.empty:
+        if 'yield_summary' in globals() and not yield_summary.empty:
             yield_report = yield_summary.copy()
             _doc_add_table(
                 doc,
@@ -2930,7 +2930,7 @@ if uploaded_file is not None:
                 width=6.8
             )
 
-        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+        if 'scrap_by_period' in globals() and not scrap_by_period.empty:
             _doc_add_table(
                 doc,
                 scrap_by_period.drop(
@@ -2977,7 +2977,7 @@ if uploaded_file is not None:
             "production timing and customer use."
         )
 
-        if 'matrix_data' in locals() and not matrix_data.empty:
+        if 'matrix_data' in globals() and not matrix_data.empty:
             matrix_report = matrix_data.copy()
 
             preferred_cols = [
@@ -3021,7 +3021,7 @@ if uploaded_file is not None:
                 width=6.8
             )
 
-        if 't7_summary' in locals() and not t7_summary.empty:
+        if 't7_summary' in globals() and not t7_summary.empty:
             _doc_add_table(
                 doc,
                 t7_summary,
@@ -3050,7 +3050,7 @@ if uploaded_file is not None:
 
         actions = []
 
-        if 'scrap_by_period' in locals() and not scrap_by_period.empty:
+        if 'scrap_by_period' in globals() and not scrap_by_period.empty:
             nonzero = scrap_by_period[
                 scrap_by_period['Scrap_Rate (%)'] > 0
             ]
@@ -3065,13 +3065,13 @@ if uploaded_file is not None:
                     f"({worst['Scrap_Rate (%)']:.2f}%)."
                 )
 
-        if 't7_summary' in locals() and not t7_summary.empty:
+        if 't7_summary' in globals() and not t7_summary.empty:
             actions.append(
                 "Compare scrap changes against YS / TS / EL / YPE stability "
                 "before attributing customer-end failure to material."
             )
 
-        if 'matrix_data' in locals() and not matrix_data.empty:
+        if 'matrix_data' in globals() and not matrix_data.empty:
             actions.append(
                 "Use the Production-vs-Usage matrix to trace whether high-scrap "
                 "events are concentrated in specific production periods, usage months, "
@@ -3194,7 +3194,7 @@ if uploaded_file is not None:
             engine='xlsxwriter'
         ) as writer:
 
-            if 'yield_summary' in locals() and not yield_summary.empty:
+            if 'yield_summary' in globals() and not yield_summary.empty:
                 yield_summary.to_excel(
                     writer,
                     sheet_name='Yield_Detailed',
@@ -3202,7 +3202,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'grade_dist_display' in locals()
+                'grade_dist_display' in globals()
                 and not grade_dist_display.empty
             ):
                 grade_dist_display.to_excel(
@@ -3212,7 +3212,7 @@ if uploaded_file is not None:
 
             # Technical SPC remains in Excel only.
             if (
-                'cap_summary_rows' in locals()
+                'cap_summary_rows' in globals()
                 and cap_summary_rows
             ):
                 pd.DataFrame(
@@ -3224,7 +3224,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'plot_df_base' in locals()
+                'plot_df_base' in globals()
                 and not plot_df_base.empty
             ):
                 plot_df_base.to_excel(
@@ -3234,7 +3234,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'trend_data' in locals()
+                'trend_data' in globals()
                 and not trend_data.empty
             ):
                 trend_export = trend_data.drop(
@@ -3249,7 +3249,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'scrap_by_period' in locals()
+                'scrap_by_period' in globals()
                 and not scrap_by_period.empty
             ):
                 scrap_by_period.to_excel(
@@ -3259,7 +3259,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'scrap_detail' in locals()
+                'scrap_detail' in globals()
                 and not scrap_detail.empty
             ):
                 scrap_detail.to_excel(
@@ -3269,7 +3269,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                'matrix_data' in locals()
+                'matrix_data' in globals()
                 and not matrix_data.empty
             ):
                 matrix_data.to_excel(
@@ -3279,7 +3279,7 @@ if uploaded_file is not None:
                 )
 
             if (
-                't7_summary' in locals()
+                't7_summary' in globals()
                 and not t7_summary.empty
             ):
                 t7_summary.to_excel(
