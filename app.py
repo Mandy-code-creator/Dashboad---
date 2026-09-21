@@ -56,8 +56,13 @@ for t in target_thicks:
 
 uploaded_file = st.file_uploader("Upload Production Data (.xlsx)", type=["xlsx"])
 
+@st.cache_data(show_spinner=False)
+def _load_uploaded_excel(file_bytes):
+    """Cache Excel parsing so widget changes do not re-read the workbook."""
+    return pd.read_excel(io.BytesIO(file_bytes))
+
 if uploaded_file is not None:
-    df = pd.read_excel(uploaded_file)
+    df = _load_uploaded_excel(uploaded_file.getvalue()).copy()
     df.columns = df.columns.astype(str).str.strip()
 
     # Keep one untouched source copy for Task 6 (Production vs Usage Matrix).
@@ -613,6 +618,22 @@ if uploaded_file is not None:
             ax.set_title(title, fontsize=10, fontweight='bold')
             add_chart_border(ax)
 
+    # --- PERFORMANCE MODE ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚡ Performance")
+    performance_mode = st.sidebar.toggle(
+        "Performance Mode",
+        value=True,
+        help=(
+            "Recommended for large files. Heavy chart sections render only when requested, "
+            "and multi-feature views are reduced to one selected feature at a time."
+        )
+    )
+    if performance_mode:
+        plt.rcParams['figure.dpi'] = 90
+    else:
+        plt.rcParams['figure.dpi'] = 120
+
     # --- TABS ---
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📁 1. Raw Data", 
@@ -864,62 +885,73 @@ if uploaded_file is not None:
                 use_container_width=True, hide_index=True
             )
             st.markdown("---")
-    
-        for period in ordered_periods:
-            df_p = df[df['Time_Group'] == period]
-            if df_p.empty:
-                continue
-    
-            st.markdown(f"## 📅 Period: **{period}**")
-            available_features = [f for f in spc_features if f in df_p.columns]
-    
-            # Overall
-            ov_y = get_shared_y(df_p, available_features)
-            st.markdown("#### 🌐 Overall Summary (All Thicknesses)")
-            cols = st.columns(2)
-    
-            for idx, f in enumerate(available_features):
-                with cols[idx % 2]:
-                    df_p_valid = df_p[df_p['Valid_Qty'] > 0]
-                    vals_all = df_p_valid[f].dropna().values
-    
-                    render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
-    
-                    chart_title = (f"Coating Thickness Avg (Overall - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Overall - {period})")
-    
-                    fig, ax = plt.subplots(figsize=(8, 4.5))
-                    plot_dist(ax, df_p, f, chart_title, ov_y, period, 'Overall')
-                    fig.tight_layout()
-                    st.pyplot(fig)
-                    plt.close(fig)
-    
-            # Per steel thickness
-            for thick in thickness_list:
-                df_t = df_p[df_p['Actual_Thickness'] == thick]
-                if df_t.empty:
+
+        render_spc_charts = st.toggle(
+            "Render SPC distribution charts",
+            value=not performance_mode,
+            key="render_spc_charts",
+            help="Keep this off for faster interaction; the capability summary table above remains available."
+        )
+
+        if not render_spc_charts:
+            st.info("SPC charts are paused to reduce CPU/RAM usage. Turn on 'Render SPC distribution charts' when needed.")
+
+        if render_spc_charts:
+            for period in ordered_periods:
+                df_p = df[df['Time_Group'] == period]
+                if df_p.empty:
                     continue
     
-                st.markdown(f"#### 📏 Thickness: **{thick}mm**")
-                available_t_features = [f for f in spc_features if f in df_t.columns]
-                ly = get_shared_y(df_t, available_t_features)
-                tcols = st.columns(2)
+                st.markdown(f"## 📅 Period: **{period}**")
+                available_features = [f for f in spc_features if f in df_p.columns]
     
-                for idx, f in enumerate(available_t_features):
-                    with tcols[idx % 2]:
-                        df_t_valid = df_t[df_t['Valid_Qty'] > 0]
-                        vals_t = df_t_valid[f].dropna().values
+                # Overall
+                ov_y = get_shared_y(df_p, available_features)
+                st.markdown("#### 🌐 Overall Summary (All Thicknesses)")
+                cols = st.columns(2)
     
-                        render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
+                for idx, f in enumerate(available_features):
+                    with cols[idx % 2]:
+                        df_p_valid = df_p[df_p['Valid_Qty'] > 0]
+                        vals_all = df_p_valid[f].dropna().values
     
-                        chart_title = (f"Coating Thickness Avg (Thick:{thick} - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Thick:{thick} - {period})")
+                        render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
+    
+                        chart_title = (f"Coating Thickness Avg (Overall - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Overall - {period})")
     
                         fig, ax = plt.subplots(figsize=(8, 4.5))
-                        plot_dist(ax, df_t, f, chart_title, ly, period, thick)
+                        plot_dist(ax, df_p, f, chart_title, ov_y, period, 'Overall')
                         fig.tight_layout()
                         st.pyplot(fig)
                         plt.close(fig)
     
-            st.markdown("---")
+                # Per steel thickness
+                for thick in thickness_list:
+                    df_t = df_p[df_p['Actual_Thickness'] == thick]
+                    if df_t.empty:
+                        continue
+    
+                    st.markdown(f"#### 📏 Thickness: **{thick}mm**")
+                    available_t_features = [f for f in spc_features if f in df_t.columns]
+                    ly = get_shared_y(df_t, available_t_features)
+                    tcols = st.columns(2)
+    
+                    for idx, f in enumerate(available_t_features):
+                        with tcols[idx % 2]:
+                            df_t_valid = df_t[df_t['Valid_Qty'] > 0]
+                            vals_t = df_t_valid[f].dropna().values
+    
+                            render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
+    
+                            chart_title = (f"Coating Thickness Avg (Thick:{thick} - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Thick:{thick} - {period})")
+    
+                            fig, ax = plt.subplots(figsize=(8, 4.5))
+                            plot_dist(ax, df_t, f, chart_title, ly, period, thick)
+                            fig.tight_layout()
+                            st.pyplot(fig)
+                            plt.close(fig)
+    
+                st.markdown("---")
 
     # ==========================================================
     # TASK 4: POST-CONTROL TRACKING (I-MR CHARTS)
@@ -945,7 +977,17 @@ if uploaded_file is not None:
             else:
                 plot_df_base = df_t4.copy()
     
-            t4_features = ['YS', 'TS', 'EL', 'YPE', 'Coating_Thickness_Avg']
+            t4_features_all = ['YS', 'TS', 'EL', 'YPE', 'Coating_Thickness_Avg']
+            t4_features_available = [f for f in t4_features_all if f in plot_df_base.columns]
+            if performance_mode and t4_features_available:
+                selected_t4_feature = st.selectbox(
+                    "Feature to render (Performance Mode)",
+                    t4_features_available,
+                    key="t4_feature_perf"
+                )
+                t4_features = [selected_t4_feature]
+            else:
+                t4_features = t4_features_available
             coating_groups = ['25 min (Estimated)', '40 min (Estimated)']
     
             for t4_feat in t4_features:
@@ -1990,8 +2032,18 @@ if uploaded_file is not None:
 
                 row1_cols, row2_cols = st.columns(2), st.columns(2)
                 cols = row1_cols + row2_cols 
-                features = [('Avg_YS', 'Actual YS', '#1f77b4'), ('Avg_TS', 'Actual TS', '#2ca02c'), 
-                            ('Avg_EL', 'Actual EL', '#9467bd'), ('Avg_YPE', 'Actual YPE', '#ff7f0e')]
+                features_all = [('Avg_YS', 'Actual YS', '#1f77b4'), ('Avg_TS', 'Actual TS', '#2ca02c'), 
+                                ('Avg_EL', 'Actual EL', '#9467bd'), ('Avg_YPE', 'Actual YPE', '#ff7f0e')]
+                if performance_mode:
+                    valid_feature_labels = [label for col_name, label, color in features_all if col_name in macro_df.columns]
+                    selected_label = st.selectbox(
+                        "Material feature to render (Performance Mode)",
+                        valid_feature_labels,
+                        key="t6_feature_perf"
+                    ) if valid_feature_labels else None
+                    features = [item for item in features_all if item[1] == selected_label] if selected_label else []
+                else:
+                    features = features_all
 
                 for idx, (col_name, label, color) in enumerate(features):
                     if col_name not in macro_df.columns or (macro_df[col_name] == macro_df['Total_Length']).all():
@@ -2521,7 +2573,17 @@ if uploaded_file is not None:
         t7_row1, t7_row2 = st.columns(2), st.columns(2)
         t7_cols = t7_row1 + t7_row2
         
-        features_to_plot = [('YS', 'Actual YS', '#1f77b4'), ('TS', 'Actual TS', '#2ca02c'), ('EL', 'Actual EL', '#9467bd'), ('YPE', 'Actual YPE', '#ff7f0e')]
+        features_to_plot_all = [('YS', 'Actual YS', '#1f77b4'), ('TS', 'Actual TS', '#2ca02c'), ('EL', 'Actual EL', '#9467bd'), ('YPE', 'Actual YPE', '#ff7f0e')]
+        if performance_mode:
+            available_t7 = [item for item in features_to_plot_all if item[0] in t7_summary.columns]
+            selected_t7_label = st.selectbox(
+                "Feature to render (Performance Mode)",
+                [item[1] for item in available_t7],
+                key="t7_feature_perf"
+            ) if available_t7 else None
+            features_to_plot = [item for item in available_t7 if item[1] == selected_t7_label] if selected_t7_label else []
+        else:
+            features_to_plot = features_to_plot_all
 
         for idx, (feat_id, label, color) in enumerate(features_to_plot):
             if feat_id in t7_summary.columns:
