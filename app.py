@@ -1964,44 +1964,6 @@ if uploaded_file is not None:
                     hide_index=True
                 )
 
-            # =========================================================================
-            # 🔍 METHOD 3: MISSING COILS FINDER & TRACER BULLET (DEBUGGING)
-            # =========================================================================
-            st.markdown("---")
-            st.markdown("### 🕵️‍♂️ Debug: Usage-Month Coil Finder & Tracer")
-            col_find, col_trace = st.columns(2)
-            
-            with col_find:
-                st.write("**Step 1: Find Missing Coils**")
-                available_months = sorted(df_sorted['Usage_Month'].unique(), reverse=True)
-                check_month = st.selectbox("Select Customer Usage Month:", available_months)
-                
-                if check_month:
-                    raw_coils = set(df_sorted[df_sorted['Usage_Month'] == check_month][COIL_ID_COL].dropna().unique())
-                    final_coils = set(df_coil[df_coil['Usage_Month'] == check_month][COIL_ID_COL].dropna().unique())
-                    missing_coils = raw_coils - final_coils
-                    
-                    if missing_coils:
-                        st.warning(f"⚠️ Found {len(missing_coils)} coils missing from final {check_month} aggregation:")
-                        st.code(", ".join(list(missing_coils)))
-                    else:
-                        st.success(f"✅ 0 missing coils. Raw data perfectly matches final output for {check_month}.")
-
-            with col_trace:
-                st.write("**Step 2: Track Calculation Path**")
-                test_coil = st.text_input("Enter Coil ID to investigate:")
-                if test_coil:
-                    test_coil = test_coil.strip()
-                    raw_history = df_sorted[df_sorted[COIL_ID_COL] == test_coil]
-                    if raw_history.empty:
-                        st.error(f"❌ Coil ID '{test_coil}' not found in valid usage data.")
-                    else:
-                        st.dataframe(raw_history[['Usage_Date', 'Usage_Month', LEN_COL, SCRAP_COL]], use_container_width=True)
-                        final_month = df_coil[df_coil[COIL_ID_COL] == test_coil]['Usage_Month'].values
-                        if len(final_month) > 0: st.success(f"👉 Assigned to final month: **{final_month[0]}**.")
-                        else: st.error("❌ Dropped entirely during aggregation.")
-            st.markdown("---")
-
             if df_coil.empty:
                 st.warning("No usage data available.")
             else:
@@ -2403,43 +2365,6 @@ if uploaded_file is not None:
                 st.caption("Matrix Logic: Columns = Customer Usage Month | Rows = Production Month (2024 grouped as Full Year) | Production source = 烤三生產日期 | Usage source = 使用日期 | Background Color = Scrap Severity")
                 st.markdown("---")
                 
-                # Split Coil Verification
-                st.subheader("Split Coil Verification")
-                st.info("Identifying identical coils processed on both machines to isolate machine impact.")
-                coil_status_scrap = df_t6.groupby([COIL_ID_COL, 'Machine_Status']).agg({LEN_COL: 'sum', SCRAP_COL: 'sum'}).reset_index()
-                coil_status_scrap['Scrap_Rate'] = np.where(coil_status_scrap[LEN_COL] > 0, (coil_status_scrap[SCRAP_COL] / coil_status_scrap[LEN_COL]) * 100, 0)
-                
-                old_machine_col = 'Old Machine (< Apr 2026)'
-                new_machine_col = 'New Machine (>= Apr 2026)'
-                split_pivot = coil_status_scrap.pivot(index=COIL_ID_COL, columns='Machine_Status', values='Scrap_Rate').dropna(subset=[old_machine_col, new_machine_col])
-                
-                if not split_pivot.empty:
-                    split_pivot['Delta (%)'] = split_pivot[old_machine_col] - split_pivot[new_machine_col]
-                    conds = [
-                        (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] < 5),
-                        (split_pivot[old_machine_col] > 10) & (split_pivot[new_machine_col] >= 5),
-                        (split_pivot[new_machine_col] > split_pivot[old_machine_col] + 5),
-                        (split_pivot[old_machine_col] > 0) & (split_pivot[new_machine_col] == 0)
-                    ]
-                    choices = ["🚨 Old Machine Issue (Proven)", "⚠️ Material / Process Issue", "⚙️ New Machine Tuning Issue", "✅ Improved on New Machine"]
-                    split_pivot['Root Cause Classification'] = np.select(conds, choices, default="✅ Normal / Stable")
-                    
-                    if props_cols:
-                        coil_props = df_t6[df_t6[COIL_ID_COL].isin(split_pivot.index)].groupby(COIL_ID_COL)[props_cols].mean()
-                        split_pivot = split_pivot.join(coil_props)
-                    
-                    rename_dict = {old_machine_col: 'Scrap (Old Machine)', new_machine_col: 'Scrap (New Machine)',
-                                   'YS': 'Actual YS', 'TS': 'Actual TS', 'EL': 'Actual EL', 'YPE': 'Actual YPE'}
-                    split_report = split_pivot.rename(columns=rename_dict).reset_index()
-                    
-                    format_dict = {'Scrap (Old Machine)': '{:.2f}%', 'Scrap (New Machine)': '{:.2f}%', 'Delta (%)': '{:.2f}%',
-                                   'Actual YS': '{:.1f}', 'Actual TS': '{:.1f}', 'Actual EL': '{:.1f}', 'Actual YPE': '{:.1f}'}
-                    st.dataframe(
-                        split_report.style.format(format_dict, na_rep="N/A").background_gradient(subset=['Scrap (Old Machine)', 'Scrap (New Machine)'], cmap='Reds'),
-                        use_container_width=True, hide_index=True
-                    )
-                else:
-                    st.success("All multi-machine coils achieved perfect quality (0% scrap) or no split-coils found.")
         else:
             st.error("Missing required columns for Task 6 Analysis ('Usage Date', 'Coil ID', 'Length', or 'Scrap').")
 
