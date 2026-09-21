@@ -2049,6 +2049,87 @@ if uploaded_file is not None:
                     df_matrix['Production_Date'].dt.strftime('%Y-%m')
                 )
 
+                # ==========================================================
+                # MATRIX DISPLAY / WORD EXPORT TIME FILTER
+                # The selected Usage Month range controls BOTH the on-screen
+                # matrix and the dedicated Word matrix report below.
+                # ==========================================================
+                st.markdown("#### 🗓️ Matrix Time Range")
+
+                available_matrix_months = sorted(
+                    df_matrix['Usage_Month']
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+
+                matrix_period_mode = st.radio(
+                    "Time Range",
+                    ["All", "Custom Range"],
+                    horizontal=True,
+                    key="matrix_period_mode"
+                )
+
+                matrix_start_month = None
+                matrix_end_month = None
+
+                if available_matrix_months:
+                    if matrix_period_mode == "Custom Range":
+                        c_start, c_end = st.columns(2)
+
+                        with c_start:
+                            matrix_start_month = st.selectbox(
+                                "From Month",
+                                options=available_matrix_months,
+                                index=0,
+                                key="matrix_start_month"
+                            )
+
+                        with c_end:
+                            matrix_end_month = st.selectbox(
+                                "To Month",
+                                options=available_matrix_months,
+                                index=len(available_matrix_months) - 1,
+                                key="matrix_end_month"
+                            )
+
+                        # Protect against an accidentally reversed period.
+                        if matrix_start_month > matrix_end_month:
+                            matrix_start_month, matrix_end_month = (
+                                matrix_end_month, matrix_start_month
+                            )
+                            st.warning(
+                                "From Month was later than To Month, so the range was reversed automatically."
+                            )
+
+                        df_matrix = df_matrix[
+                            df_matrix['Usage_Month'].astype(str).between(
+                                matrix_start_month,
+                                matrix_end_month,
+                                inclusive='both'
+                            )
+                        ].copy()
+
+                        matrix_period_label = (
+                            f"{matrix_start_month} to {matrix_end_month}"
+                        )
+                        st.caption(
+                            f"Matrix / Word report period: **{matrix_period_label}**"
+                        )
+                    else:
+                        matrix_start_month = available_matrix_months[0]
+                        matrix_end_month = available_matrix_months[-1]
+                        matrix_period_label = (
+                            f"All ({matrix_start_month} to {matrix_end_month})"
+                        )
+                        st.caption(
+                            f"Matrix / Word report period: **{matrix_period_label}**"
+                        )
+                else:
+                    matrix_period_label = "No valid Usage Month"
+                    st.warning("No valid Usage Month is available for the matrix.")
+
                 # Aggregate all matrix information from the one-coil-one-row source.
                 agg_dict = {
                     'Total_Length': (LEN_COL, 'sum'),
@@ -2235,6 +2316,7 @@ if uploaded_file is not None:
                     section.page_width, section.page_height = section.page_height, section.page_width
                     section.left_margin, section.right_margin = Inches(0.5), Inches(0.5)
                     doc.add_heading('Production vs Usage Quality Matrix', level=1)
+                    doc.add_paragraph(f'Matrix period: {matrix_period_label}')
                     
                     def set_cell_background(cell, hex_color):
                         hex_color = hex_color.replace("#", "")
