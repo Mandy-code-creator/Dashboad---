@@ -1122,17 +1122,79 @@ if uploaded_file is not None:
                     add_chart_border(ax_mr)
     
                     # Timeline Axis
-                    month_labels = plot_df['Production_Date'].dt.strftime('%Y-%m')
-                    month_start_idx = np.where(month_labels.ne(month_labels.shift()))[0]
-                    ax_mr.set_xticks(month_start_idx)
-                    ax_mr.set_xticklabels(month_labels.iloc[month_start_idx], rotation=0, ha='center', fontsize=9, fontweight='bold')
-                    
+                    # Use the CENTER of each production month rather than the first
+                    # observation. If two month centers are too close, suppress the
+                    # intermediate label to prevent overlapping text. Vertical month
+                    # separators are still drawn for every month.
+                    month_labels = (
+                        plot_df['Production_Date']
+                        .dt.strftime('%Y-%m')
+                        .reset_index(drop=True)
+                    )
+                    month_start_idx = np.where(
+                        month_labels.ne(month_labels.shift())
+                    )[0]
+
+                    month_end_idx = np.r_[
+                        month_start_idx[1:] - 1,
+                        len(month_labels) - 1
+                    ]
+                    month_center_idx = (month_start_idx + month_end_idx) / 2.0
+
+                    # Dynamic spacing: keeps the axis readable even when later
+                    # months contain only a few coils and therefore cluster together.
+                    min_label_gap = max(3.0, len(vals) * 0.055)
+                    keep_month_pos = []
+                    for pos_i, center_x in enumerate(month_center_idx):
+                        if (
+                            not keep_month_pos
+                            or center_x - month_center_idx[keep_month_pos[-1]] >= min_label_gap
+                        ):
+                            keep_month_pos.append(pos_i)
+
+                    # Always retain the final month. If it is too close to the
+                    # previous retained month, replace that label with the final one.
+                    if len(month_center_idx) > 0:
+                        last_i = len(month_center_idx) - 1
+                        if not keep_month_pos:
+                            keep_month_pos = [last_i]
+                        elif keep_month_pos[-1] != last_i:
+                            if (
+                                len(keep_month_pos) > 1
+                                and month_center_idx[last_i] - month_center_idx[keep_month_pos[-1]] < min_label_gap
+                            ):
+                                keep_month_pos[-1] = last_i
+                            else:
+                                keep_month_pos.append(last_i)
+
+                    keep_month_pos = np.array(keep_month_pos, dtype=int)
+
+                    if len(keep_month_pos) > 0:
+                        tick_positions = month_center_idx[keep_month_pos]
+                        tick_labels = month_labels.iloc[
+                            month_start_idx[keep_month_pos]
+                        ].tolist()
+
+                        ax_mr.set_xticks(tick_positions)
+                        ax_mr.set_xticklabels(
+                            tick_labels,
+                            rotation=45,
+                            ha='right',
+                            fontsize=8,
+                            fontweight='bold'
+                        )
+
+                    # Align the MR chart with the I-chart observation index.
+                    ax_mr.set_xlim(-0.5, len(vals) - 0.5)
+
+                    # Keep separators for EVERY month even if a crowded label is hidden.
                     for idx in month_start_idx[1:]:
                         separator_x = idx - 0.5
                         ax_i.axvline(separator_x, color='#9E9E9E', linestyle=':', linewidth=1.0, alpha=0.85, zorder=0)
                         ax_mr.axvline(separator_x, color='#9E9E9E', linestyle=':', linewidth=1.0, alpha=0.85, zorder=0)
     
                     fig_imr.tight_layout()
+                    fig_imr.subplots_adjust(bottom=0.15, hspace=0.30)
                     st.pyplot(fig_imr)
     
                     # PPTX EXPORT
@@ -3052,13 +3114,45 @@ if uploaded_file is not None:
             month_labels.ne(month_labels.shift())
         )[0]
 
-        ax_mr.set_xticks(month_start_idx)
-        ax_mr.set_xticklabels(
-            month_labels.iloc[month_start_idx],
-            rotation=35,
-            ha='right',
-            fontsize=8
-        )
+        month_end_idx = np.r_[
+            month_start_idx[1:] - 1,
+            len(month_labels) - 1
+        ]
+        month_center_idx = (month_start_idx + month_end_idx) / 2.0
+
+        min_label_gap = max(3.0, len(vals) * 0.055)
+        keep_month_pos = []
+        for pos_i, center_x in enumerate(month_center_idx):
+            if (
+                not keep_month_pos
+                or center_x - month_center_idx[keep_month_pos[-1]] >= min_label_gap
+            ):
+                keep_month_pos.append(pos_i)
+
+        if len(month_center_idx) > 0:
+            last_i = len(month_center_idx) - 1
+            if not keep_month_pos:
+                keep_month_pos = [last_i]
+            elif keep_month_pos[-1] != last_i:
+                if (
+                    len(keep_month_pos) > 1
+                    and month_center_idx[last_i] - month_center_idx[keep_month_pos[-1]] < min_label_gap
+                ):
+                    keep_month_pos[-1] = last_i
+                else:
+                    keep_month_pos.append(last_i)
+
+        keep_month_pos = np.array(keep_month_pos, dtype=int)
+        if len(keep_month_pos) > 0:
+            ax_mr.set_xticks(month_center_idx[keep_month_pos])
+            ax_mr.set_xticklabels(
+                month_labels.iloc[month_start_idx[keep_month_pos]],
+                rotation=45,
+                ha='right',
+                fontsize=8
+            )
+
+        ax_mr.set_xlim(-0.5, len(vals) - 0.5)
 
         for pos in month_start_idx[1:]:
             x = pos - 0.5
