@@ -897,60 +897,93 @@ if uploaded_file is not None:
             st.info("SPC charts are paused to reduce CPU/RAM usage. Turn on 'Render SPC distribution charts' when needed.")
 
         if render_spc_charts:
-            for period in ordered_periods:
-                df_p = df[df['Time_Group'] == period]
+            # ----------------------------------------------------------
+            # SPC DISTRIBUTION CHARTS: DISPLAY BY YEAR (not by month)
+            # ----------------------------------------------------------
+            df_spc_year = df.copy()
+            df_spc_year = df_spc_year[df_spc_year['Production_Date'].notna()].copy()
+            df_spc_year['SPC_Year'] = df_spc_year['Production_Date'].dt.year.astype(int)
+            ordered_years = sorted(df_spc_year['SPC_Year'].dropna().unique().tolist())
+
+            st.caption(
+                "Distribution charts are aggregated by production year to reduce chart volume. "
+                "The Detailed Capability Log above remains monthly so Q4 2025 control logic is preserved."
+            )
+
+            for year in ordered_years:
+                df_p = df_spc_year[df_spc_year['SPC_Year'] == year].copy()
                 if df_p.empty:
                     continue
-    
-                st.markdown(f"## 📅 Period: **{period}**")
+
+                year_label = str(year)
+                # For annual chart overlays, apply active spec lines only to full years
+                # that are completely inside the monitored period. 2025 contains pre-Q4 data,
+                # so it is shown as a distribution only without capability/spec overlays.
+                capability_period = f"{year}-12" if year >= 2026 else year_label
+
+                st.markdown(f"## 📅 Year: **{year_label}**")
                 available_features = [f for f in spc_features if f in df_p.columns]
-    
+
                 # Overall
                 ov_y = get_shared_y(df_p, available_features)
                 st.markdown("#### 🌐 Overall Summary (All Thicknesses)")
                 cols = st.columns(2)
-    
+
                 for idx, f in enumerate(available_features):
                     with cols[idx % 2]:
                         df_p_valid = df_p[df_p['Valid_Qty'] > 0]
                         vals_all = df_p_valid[f].dropna().values
-    
-                        render_capability_badge(calc_capability(vals_all, f, period, 'Overall'), f, period, 'Overall')
-    
-                        chart_title = (f"Coating Thickness Avg (Overall - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Overall - {period})")
-    
+
+                        render_capability_badge(
+                            calc_capability(vals_all, f, capability_period, 'Overall'),
+                            f, capability_period, 'Overall'
+                        )
+
+                        chart_title = (
+                            f"Coating Thickness Avg (Overall - {year_label})"
+                            if f == 'Coating_Thickness_Avg'
+                            else f"{f} (Overall - {year_label})"
+                        )
+
                         fig, ax = plt.subplots(figsize=(8, 4.5))
-                        plot_dist(ax, df_p, f, chart_title, ov_y, period, 'Overall')
+                        plot_dist(ax, df_p, f, chart_title, ov_y, capability_period, 'Overall')
                         fig.tight_layout()
                         st.pyplot(fig)
                         plt.close(fig)
-    
+
                 # Per steel thickness
                 for thick in thickness_list:
                     df_t = df_p[df_p['Actual_Thickness'] == thick]
                     if df_t.empty:
                         continue
-    
+
                     st.markdown(f"#### 📏 Thickness: **{thick}mm**")
                     available_t_features = [f for f in spc_features if f in df_t.columns]
                     ly = get_shared_y(df_t, available_t_features)
                     tcols = st.columns(2)
-    
+
                     for idx, f in enumerate(available_t_features):
                         with tcols[idx % 2]:
                             df_t_valid = df_t[df_t['Valid_Qty'] > 0]
                             vals_t = df_t_valid[f].dropna().values
-    
-                            render_capability_badge(calc_capability(vals_t, f, period, thick), f, period, thick)
-    
-                            chart_title = (f"Coating Thickness Avg (Thick:{thick} - {period})" if f == 'Coating_Thickness_Avg' else f"{f} (Thick:{thick} - {period})")
-    
+
+                            render_capability_badge(
+                                calc_capability(vals_t, f, capability_period, thick),
+                                f, capability_period, thick
+                            )
+
+                            chart_title = (
+                                f"Coating Thickness Avg (Thick:{thick} - {year_label})"
+                                if f == 'Coating_Thickness_Avg'
+                                else f"{f} (Thick:{thick} - {year_label})"
+                            )
+
                             fig, ax = plt.subplots(figsize=(8, 4.5))
-                            plot_dist(ax, df_t, f, chart_title, ly, period, thick)
+                            plot_dist(ax, df_t, f, chart_title, ly, capability_period, thick)
                             fig.tight_layout()
                             st.pyplot(fig)
                             plt.close(fig)
-    
+
                 st.markdown("---")
 
     # ==========================================================
