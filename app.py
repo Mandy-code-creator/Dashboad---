@@ -2051,17 +2051,34 @@ if uploaded_file is not None:
 
                 # ==========================================================
                 # MATRIX DISPLAY / WORD EXPORT TIME FILTER
-                # The selected Usage Month range controls BOTH the on-screen
-                # matrix and the dedicated Word matrix report below.
+                # IMPORTANT:
+                # The selected range is applied to BOTH Production Month
+                # and Usage Month BEFORE any matrix KPI is calculated.
+                # Therefore Total Output, Total Usage, Length / Weight,
+                # Scrap Rate, Grade %, on-screen Matrix, Audit and Word
+                # export all use the exact same filtered source data.
                 # ==========================================================
                 st.markdown("#### 🗓️ Matrix Time Range")
 
-                available_matrix_months = sorted(
+                production_month_options = (
+                    df_matrix['Production_Month']
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+                usage_month_options = (
                     df_matrix['Usage_Month']
                     .dropna()
                     .astype(str)
                     .unique()
                     .tolist()
+                )
+
+                # Use the union so the selector represents the full calendar
+                # span covered by either Production or Usage data.
+                available_matrix_months = sorted(
+                    set(production_month_options) | set(usage_month_options)
                 )
 
                 matrix_period_mode = st.radio(
@@ -2103,19 +2120,36 @@ if uploaded_file is not None:
                                 "From Month was later than To Month, so the range was reversed automatically."
                             )
 
-                        df_matrix = df_matrix[
-                            df_matrix['Usage_Month'].astype(str).between(
+                        production_in_range = (
+                            df_matrix['Production_Month']
+                            .astype(str)
+                            .between(
                                 matrix_start_month,
                                 matrix_end_month,
                                 inclusive='both'
                             )
+                        )
+                        usage_in_range = (
+                            df_matrix['Usage_Month']
+                            .astype(str)
+                            .between(
+                                matrix_start_month,
+                                matrix_end_month,
+                                inclusive='both'
+                            )
+                        )
+
+                        # BOTH dates must fall inside the selected range.
+                        df_matrix = df_matrix[
+                            production_in_range & usage_in_range
                         ].copy()
 
                         matrix_period_label = (
                             f"{matrix_start_month} to {matrix_end_month}"
                         )
                         st.caption(
-                            f"Matrix / Word report period: **{matrix_period_label}**"
+                            f"Matrix / Word report period: **{matrix_period_label}** | "
+                            "Applied to **both Production Month and Usage Month** before all calculations."
                         )
                     else:
                         matrix_start_month = available_matrix_months[0]
@@ -2124,11 +2158,21 @@ if uploaded_file is not None:
                             f"All ({matrix_start_month} to {matrix_end_month})"
                         )
                         st.caption(
-                            f"Matrix / Word report period: **{matrix_period_label}**"
+                            f"Matrix / Word report period: **{matrix_period_label}** | "
+                            "All available Production and Usage months are included."
                         )
                 else:
-                    matrix_period_label = "No valid Usage Month"
-                    st.warning("No valid Usage Month is available for the matrix.")
+                    matrix_period_label = "No valid Production / Usage Month"
+                    st.warning(
+                        "No valid Production Month or Usage Month is available for the matrix."
+                    )
+
+                if matrix_period_mode == "Custom Range":
+                    st.info(
+                        f"Filtered source: {len(df_matrix):,} coils where BOTH Production Month and Usage Month "
+                        f"are within {matrix_start_month} ~ {matrix_end_month}. "
+                        "All Matrix totals, Scrap Rate, Grade %, Audit and Word export are recalculated from this source."
+                    )
 
                 # Aggregate all matrix information from the one-coil-one-row source.
                 agg_dict = {
@@ -2317,6 +2361,7 @@ if uploaded_file is not None:
                     section.left_margin, section.right_margin = Inches(0.5), Inches(0.5)
                     doc.add_heading('Production vs Usage Quality Matrix', level=1)
                     doc.add_paragraph(f'Matrix period: {matrix_period_label}')
+                    doc.add_paragraph('Time filter rule: both Production Month and Usage Month must fall within the selected range. All totals and quality indicators in this report are recalculated from the filtered matrix source.')
                     
                     def set_cell_background(cell, hex_color):
                         hex_color = hex_color.replace("#", "")
