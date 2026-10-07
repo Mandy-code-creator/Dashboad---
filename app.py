@@ -2430,11 +2430,11 @@ if uploaded_file is not None:
                     "</style>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
-                html_parts.extend([f"<th>{m}</th>" for m in usage_months])
+                html_parts.extend([f"<th>{m}<br>為茂</th>" for m in usage_months])
                 html_parts.append("<th class='summary-header'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
                 
                 for prod in prod_periods:
-                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}</th>")
+                    html_parts.append(f"<tr><th style='background-color: #f1f3f5; color: #333;'>{prod}<br>烤三</th>")
                     for usage in usage_months:
                         row = matrix_dict.get((prod, usage))
                         if not row:
@@ -2537,7 +2537,7 @@ if uploaded_file is not None:
                     hdr_cells[0].paragraphs[0].runs[0].font.bold = True
                     
                     for i, m in enumerate(usage_months):
-                        hdr_cells[i+1].text = m
+                        hdr_cells[i+1].text = f"{m}\n為茂"
                         set_cell_background(hdr_cells[i+1], "1a3a5c")
                         hdr_cells[i+1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
                         hdr_cells[i+1].paragraphs[0].runs[0].font.bold = True
@@ -2553,7 +2553,7 @@ if uploaded_file is not None:
                 
                     for prod in prod_periods:
                         row_cells = table.add_row().cells
-                        row_cells[0].text = prod
+                        row_cells[0].text = f"{prod}\n烤三"
                         set_cell_background(row_cells[0], "f1f3f5")
                         row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -3250,7 +3250,7 @@ if uploaded_file is not None:
         set_cell_background(hdr_cells[0], "1a3a5c")
 
         for i, m in enumerate(usage_months):
-            hdr_cells[i + 1].text = str(m)
+            hdr_cells[i + 1].text = f"{m}\n為茂"
             set_cell_background(
                 hdr_cells[i + 1],
                 "1a3a5c"
@@ -3273,7 +3273,7 @@ if uploaded_file is not None:
         for prod in prod_periods:
             row_cells = table.add_row().cells
 
-            row_cells[0].text = str(prod)
+            row_cells[0].text = f"{prod}\n烤三"
             set_cell_background(
                 row_cells[0],
                 "f1f3f5"
