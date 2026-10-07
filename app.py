@@ -2430,7 +2430,7 @@ if uploaded_file is not None:
                     "</style>",
                     "<table class='q-matrix'><thead><tr><th>Production \\ Usage</th>"
                 ]
-                html_parts.extend([f"<th>{m}<br>為茂</th>" for m in usage_months])
+                html_parts.extend([f"<th>{m}<br>劦茂</th>" for m in usage_months])
                 html_parts.append("<th class='summary-header'>Total Output<br>(生產總量)</th></tr></thead><tbody>")
                 
                 for prod in prod_periods:
@@ -2537,7 +2537,7 @@ if uploaded_file is not None:
                     hdr_cells[0].paragraphs[0].runs[0].font.bold = True
                     
                     for i, m in enumerate(usage_months):
-                        hdr_cells[i+1].text = f"{m}\n為茂"
+                        hdr_cells[i+1].text = f"{m}\n劦茂"
                         set_cell_background(hdr_cells[i+1], "1a3a5c")
                         hdr_cells[i+1].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
                         hdr_cells[i+1].paragraphs[0].runs[0].font.bold = True
@@ -3250,7 +3250,7 @@ if uploaded_file is not None:
         set_cell_background(hdr_cells[0], "1a3a5c")
 
         for i, m in enumerate(usage_months):
-            hdr_cells[i + 1].text = f"{m}\n為茂"
+            hdr_cells[i + 1].text = f"{m}\n劦茂"
             set_cell_background(
                 hdr_cells[i + 1],
                 "1a3a5c"
