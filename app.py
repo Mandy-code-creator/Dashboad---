@@ -2199,12 +2199,13 @@ if uploaded_file is not None:
                 # ==========================================================
                 # MATRIX DISPLAY / WORD EXPORT TIME FILTER
                 # IMPORTANT:
-                # The selected range is based ONLY on Usage Month.
-                # Production Month is NOT used to exclude coils here.
-                # This keeps all production origins that contributed to the
-                # selected customer-usage period, preserving traceability.
+                # Custom Range uses Usage Month for the selected From/To period,
+                # AND keeps only coils whose Production Month is 2026-01 onward.
+                # Therefore a coil must satisfy BOTH conditions:
+                #   1) Usage Month is within the selected Custom Range
+                #   2) Production Month is >= 2026-01
                 # All Matrix KPIs, Audit and Word export are recalculated
-                # from the same Usage-Month-filtered source.
+                # from this same filtered source.
                 # ==========================================================
                 st.markdown("#### 🗓️ Matrix Time Range")
 
@@ -2216,8 +2217,16 @@ if uploaded_file is not None:
                     .tolist()
                 )
 
-                # Time selector is driven ONLY by customer Usage Month.
+                # "All" keeps every available Usage Month.
                 available_matrix_months = sorted(set(usage_month_options))
+
+                # Custom Range selector is limited to Usage Month >= 2026-01.
+                # The filtered source will ALSO require Production Month >= 2026-01.
+                custom_matrix_months = [
+                    m for m in available_matrix_months
+                    if re.fullmatch(r'\d{4}-\d{2}', str(m))
+                    and str(m) >= '2026-01'
+                ]
 
                 matrix_period_mode = st.radio(
                     "Time Range",
@@ -2231,58 +2240,74 @@ if uploaded_file is not None:
 
                 if available_matrix_months:
                     if matrix_period_mode == "Custom Range":
-                        c_start, c_end = st.columns(2)
+                        if custom_matrix_months:
+                            c_start, c_end = st.columns(2)
 
-                        with c_start:
-                            matrix_start_month = st.selectbox(
-                                "From Usage Month",
-                                options=available_matrix_months,
-                                index=0,
-                                key="matrix_start_month"
-                            )
-
-                        with c_end:
-                            matrix_end_month = st.selectbox(
-                                "To Usage Month",
-                                options=available_matrix_months,
-                                index=len(available_matrix_months) - 1,
-                                key="matrix_end_month"
-                            )
-
-                        # Protect against an accidentally reversed period.
-                        if matrix_start_month > matrix_end_month:
-                            matrix_start_month, matrix_end_month = (
-                                matrix_end_month, matrix_start_month
-                            )
-                            st.warning(
-                                "From Usage Month was later than To Usage Month, "
-                                "so the range was reversed automatically."
-                            )
-
-                        usage_in_range = (
-                            df_matrix['Usage_Month'].notna()
-                            & df_matrix['Usage_Month']
-                                .astype(str)
-                                .between(
-                                    matrix_start_month,
-                                    matrix_end_month,
-                                    inclusive='both'
+                            with c_start:
+                                matrix_start_month = st.selectbox(
+                                    "From Usage Month",
+                                    options=custom_matrix_months,
+                                    index=0,
+                                    key="matrix_start_month"
                                 )
-                        )
 
-                        # Filter ONLY by Usage Month.
-                        # Production Month may be outside the selected range and
-                        # is intentionally retained for production-to-usage traceability.
-                        df_matrix = df_matrix[usage_in_range].copy()
+                            with c_end:
+                                matrix_end_month = st.selectbox(
+                                    "To Usage Month",
+                                    options=custom_matrix_months,
+                                    index=len(custom_matrix_months) - 1,
+                                    key="matrix_end_month"
+                                )
 
-                        matrix_period_label = (
-                            f"Usage Month: {matrix_start_month} to {matrix_end_month}"
-                        )
-                        st.caption(
-                            f"Matrix / Word report period: **{matrix_period_label}** | "
-                            "Filter applied to **Usage Month only**. "
-                            "Production Month is retained for traceability."
-                        )
+                            # Protect against an accidentally reversed period.
+                            if matrix_start_month > matrix_end_month:
+                                matrix_start_month, matrix_end_month = (
+                                    matrix_end_month, matrix_start_month
+                                )
+                                st.warning(
+                                    "From Usage Month was later than To Usage Month, "
+                                    "so the range was reversed automatically."
+                                )
+
+                            usage_in_range = (
+                                df_matrix['Usage_Month'].notna()
+                                & (df_matrix['Usage_Month'].astype(str) >= '2026-01')
+                                & df_matrix['Usage_Month']
+                                    .astype(str)
+                                    .between(
+                                        matrix_start_month,
+                                        matrix_end_month,
+                                        inclusive='both'
+                                    )
+                            )
+
+                            production_from_2026 = (
+                                df_matrix['Production_Date'].notna()
+                                & (df_matrix['Production_Date'].dt.year >= 2026)
+                            )
+
+                            # Custom Range requires BOTH:
+                            # 1) Usage Month within selected range
+                            # 2) Production Month from 2026-01 onward
+                            df_matrix = df_matrix[
+                                usage_in_range & production_from_2026
+                            ].copy()
+
+                            matrix_period_label = (
+                                f"Usage Month: {matrix_start_month} to {matrix_end_month}"
+                            )
+                            st.caption(
+                                f"Matrix / Word report period: **{matrix_period_label}** | "
+                                "Custom Range selects the period by **Usage Month** and keeps only "
+                                "coils with **Production Month >= 2026-01**."
+                            )
+                        else:
+                            matrix_period_label = "No Usage Month from 2026 onward"
+                            df_matrix = df_matrix.iloc[0:0].copy()
+                            st.warning(
+                                "Custom Range is available only for Usage Month from 2026-01 onward, "
+                                "but no 2026+ Usage Month exists in the current data."
+                            )
                     else:
                         matrix_start_month = available_matrix_months[0]
                         matrix_end_month = available_matrix_months[-1]
@@ -2299,12 +2324,12 @@ if uploaded_file is not None:
                         "No valid Usage Month is available for the matrix."
                     )
 
-                if matrix_period_mode == "Custom Range" and available_matrix_months:
+                if matrix_period_mode == "Custom Range" and custom_matrix_months:
                     st.info(
-                        f"Filtered source: {len(df_matrix):,} coils with Usage Month within "
-                        f"{matrix_start_month} ~ {matrix_end_month}. "
-                        "Production Month is not restricted. All Matrix totals, Scrap Rate, "
-                        "Grade %, Audit and Word export are recalculated from this source."
+                        f"Filtered source: {len(df_matrix):,} coils with Usage Month from "
+                        f"{matrix_start_month} ~ {matrix_end_month}, and Production Month >= 2026-01. "
+                        "All Matrix totals, Scrap Rate, Grade %, Audit and Word export are "
+                        "recalculated from this source."
                     )
 
                 # Aggregate all matrix information from the one-coil-one-row source.
@@ -2494,7 +2519,7 @@ if uploaded_file is not None:
                     section.left_margin, section.right_margin = Inches(0.5), Inches(0.5)
                     doc.add_heading('Production vs Usage Quality Matrix', level=1)
                     doc.add_paragraph(f'Matrix period: {matrix_period_label}')
-                    doc.add_paragraph('Time filter rule: the selected period is applied to Usage Month only. Production Month is retained without date restriction so the matrix can trace which production periods supplied the selected customer-usage period. All totals and quality indicators in this report are recalculated from the Usage-Month-filtered matrix source.')
+                    doc.add_paragraph('Time filter rule: for Custom Range, the selected From/To period is applied to Usage Month, and only coils with Production Month from 2026-01 onward are retained. All totals and quality indicators in this report are recalculated from the same filtered matrix source.')
                     
                     def set_cell_background(cell, hex_color):
                         hex_color = hex_color.replace("#", "")
