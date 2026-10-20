@@ -2360,26 +2360,57 @@ if uploaded_file is not None:
                 )
                 usage_months = sorted(matrix_data['Usage_Month'].unique())
 
-                # Right-side summary: one physical coil contributes length / weight once only.
+
+                # Right-side / bottom summaries.
+                # Source is one-coil-one-row, so coil count, length and weight are not duplicated.
+                prod_summary_df = (
+                    df_matrix.groupby('Production_Group', as_index=False)
+                    .agg(
+                        Total_Length=(LEN_COL, 'sum'),
+                        Total_Weight=(WT_COL, 'sum'),
+                        Total_Scrap=(SCRAP_COL, 'sum'),
+                        Total_Coils=(COIL_ID_COL, 'nunique')
+                    )
+                )
+                prod_summary_df['Scrap_Rate'] = np.where(
+                    prod_summary_df['Total_Length'] > 0,
+                    prod_summary_df['Total_Scrap'] / prod_summary_df['Total_Length'] * 100,
+                    0
+                ).round(2)
                 prod_summary = (
-                    df_matrix.groupby('Production_Group')
-                    .agg(**{
-                        LEN_COL: (LEN_COL, 'sum'),
-                        WT_COL: (WT_COL, 'sum')
-                    })
+                    prod_summary_df
+                    .set_index('Production_Group')
                     .to_dict('index')
                 )
+
+                usage_summary_df = (
+                    df_matrix.groupby('Usage_Month', as_index=False)
+                    .agg(
+                        Total_Length=(LEN_COL, 'sum'),
+                        Total_Weight=(WT_COL, 'sum'),
+                        Total_Scrap=(SCRAP_COL, 'sum'),
+                        Total_Coils=(COIL_ID_COL, 'nunique')
+                    )
+                )
+                usage_summary_df['Scrap_Rate'] = np.where(
+                    usage_summary_df['Total_Length'] > 0,
+                    usage_summary_df['Total_Scrap'] / usage_summary_df['Total_Length'] * 100,
+                    0
+                ).round(2)
                 usage_summary = (
-                    df_matrix.groupby('Usage_Month')
-                    .agg(**{
-                        LEN_COL: (LEN_COL, 'sum'),
-                        WT_COL: (WT_COL, 'sum')
-                    })
+                    usage_summary_df
+                    .set_index('Usage_Month')
                     .to_dict('index')
                 )
 
                 total_matrix_L = df_matrix[LEN_COL].sum()
                 total_matrix_W = df_matrix[WT_COL].sum()
+                total_matrix_scrap = df_matrix[SCRAP_COL].sum()
+                total_matrix_coils = df_matrix[COIL_ID_COL].nunique()
+                total_matrix_scrap_rate = (
+                    total_matrix_scrap / total_matrix_L * 100
+                    if total_matrix_L > 0 else 0
+                )
 
                 # Optional audit table: lets you manually confirm the monthly denominator.
                 with st.expander('🔎 Matrix Length / Weight Audit', expanded=False):
@@ -2388,7 +2419,7 @@ if uploaded_file is not None:
                         .agg(
                             Unique_Coils=(COIL_ID_COL, 'nunique'),
                             Total_Length_m=(LEN_COL, 'sum'),
-                            Total_Weight_kg=(WT_COL, 'sum')
+                            Total_Weight_ton=(WT_COL, lambda s: s.sum() / 1000)
                         )
                         .sort_values('Usage_Month')
                     )
@@ -2407,7 +2438,7 @@ if uploaded_file is not None:
                     st.dataframe(audit_detail, use_container_width=True, hide_index=True)
                     st.caption(
                         f'{audit_month} — Total length: {audit_detail[LEN_COL].sum():,.0f} m | '
-                        f'Total weight: {audit_detail[WT_COL].sum():,.0f} kg'
+                        f'Total weight: {audit_detail[WT_COL].sum() / 1000:,.2f} ton'
                     )
 
                 matrix_dict = (
@@ -2455,17 +2486,42 @@ if uploaded_file is not None:
                                         grade_html.append(f"<li><span class='grade-name'>{g}:</span> <span style='color:{color}'>{g_pct:.0f}%</span></li>")
                             html_parts.append(f"<td style='background-color: {bg_color};'>{cell_title_html}<ul class='grade-list'>{''.join(grade_html)}</ul></td>")
                     
-                    p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
-                    p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
-                    html_parts.append(f"<td class='summary-cell'>L: {p_len:,.0f} m<br>W: {p_wt:,.0f} kg</td></tr>")
-                
+                    p_len = prod_summary.get(prod, {}).get('Total_Length', 0)
+                    p_wt_ton = prod_summary.get(prod, {}).get('Total_Weight', 0) / 1000
+                    p_coils = prod_summary.get(prod, {}).get('Total_Coils', 0)
+                    p_scrap_rate = prod_summary.get(prod, {}).get('Scrap_Rate', 0)
+                    html_parts.append(
+                        f"<td class='summary-cell'>"
+                        f"L: {p_len:,.0f} m<br>"
+                        f"W: {p_wt_ton:,.2f} ton<br>"
+                        f"Coils: {int(p_coils)}<br>"
+                        f"Scrap: {p_scrap_rate:.2f}%"
+                        f"</td></tr>"
+                    )
+
                 html_parts.append("<tr><th class='summary-header'>Total Usage<br>(客戶使用量)</th>")
                 for usage in usage_months:
-                    u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
-                    u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
-                    html_parts.append(f"<td class='summary-cell'>L: {u_len:,.0f} m<br>W: {u_wt:,.0f} kg</td>")
-                html_parts.append(f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>Total L: {total_matrix_L:,.0f} m<br>Total W: {total_matrix_W:,.0f} kg</td></tr></tbody></table>")
-                
+                    u_len = usage_summary.get(usage, {}).get('Total_Length', 0)
+                    u_wt_ton = usage_summary.get(usage, {}).get('Total_Weight', 0) / 1000
+                    u_coils = usage_summary.get(usage, {}).get('Total_Coils', 0)
+                    u_scrap_rate = usage_summary.get(usage, {}).get('Scrap_Rate', 0)
+                    html_parts.append(
+                        f"<td class='summary-cell'>"
+                        f"L: {u_len:,.0f} m<br>"
+                        f"W: {u_wt_ton:,.2f} ton<br>"
+                        f"Coils: {int(u_coils)}<br>"
+                        f"Scrap: {u_scrap_rate:.2f}%"
+                        f"</td>"
+                    )
+                html_parts.append(
+                    f"<td class='summary-cell' style='background-color: #bbdefb; color: #b71c1c;'>"
+                    f"Total L: {total_matrix_L:,.0f} m<br>"
+                    f"Total W: {total_matrix_W / 1000:,.2f} ton<br>"
+                    f"Total Coils: {int(total_matrix_coils)}<br>"
+                    f"Scrap: {total_matrix_scrap_rate:.2f}%"
+                    f"</td></tr></tbody></table>"
+                )
+
                 matrix_html_str = "".join(html_parts)
                 capture_component = f"""
                 <!DOCTYPE html>
@@ -2592,17 +2648,24 @@ if uploaded_file is not None:
                                             run_pct.font.bold = True
                                             run_pct.font.color.rgb = RGBColor(0, 128, 0) if "A" in g else RGBColor(220, 20, 60)
                                 
-                        p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
-                        p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+                        p_len = prod_summary.get(prod, {}).get('Total_Length', 0)
+                        p_wt_ton = prod_summary.get(prod, {}).get('Total_Weight', 0) / 1000
+                        p_coils = prod_summary.get(prod, {}).get('Total_Coils', 0)
+                        p_scrap_rate = prod_summary.get(prod, {}).get('Scrap_Rate', 0)
                         cell_out = row_cells[-1]
                         set_cell_background(cell_out, "e3f2fd")
                         cell_out.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p_out = cell_out.paragraphs[0]
                         p_out.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run_out = p_out.add_run(f"L: {p_len:,.0f} m\nW: {p_wt:,.0f} kg")
+                        run_out = p_out.add_run(
+                            f"L: {p_len:,.0f} m\n"
+                            f"W: {p_wt_ton:,.2f} ton\n"
+                            f"Coils: {int(p_coils)}\n"
+                            f"Scrap: {p_scrap_rate:.2f}%"
+                        )
                         run_out.font.size, run_out.font.bold = Pt(8), True
                         run_out.font.color.rgb = RGBColor(13, 71, 161)
-                
+
                     row_cells = table.add_row().cells
                     row_cells[0].text = "Total Usage\n(客戶使用量)"
                     set_cell_background(row_cells[0], "1565c0")
@@ -2610,28 +2673,40 @@ if uploaded_file is not None:
                     row_cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     row_cells[0].paragraphs[0].runs[0].font.color.rgb = RGBColor(255, 255, 255)
                     row_cells[0].paragraphs[0].runs[0].font.bold = True
-                    
+
                     for i, usage in enumerate(usage_months):
-                        u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
-                        u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
+                        u_len = usage_summary.get(usage, {}).get('Total_Length', 0)
+                        u_wt_ton = usage_summary.get(usage, {}).get('Total_Weight', 0) / 1000
+                        u_coils = usage_summary.get(usage, {}).get('Total_Coils', 0)
+                        u_scrap_rate = usage_summary.get(usage, {}).get('Scrap_Rate', 0)
                         cell = row_cells[i+1]
                         set_cell_background(cell, "e3f2fd")
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                         p = cell.paragraphs[0]
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        run = p.add_run(f"L: {u_len:,.0f} m\nW: {u_wt:,.0f} kg")
+                        run = p.add_run(
+                            f"L: {u_len:,.0f} m\n"
+                            f"W: {u_wt_ton:,.2f} ton\n"
+                            f"Coils: {int(u_coils)}\n"
+                            f"Scrap: {u_scrap_rate:.2f}%"
+                        )
                         run.font.size, run.font.bold = Pt(8), True
                         run.font.color.rgb = RGBColor(13, 71, 161)
-                        
+
                     cell_grand = row_cells[-1]
                     set_cell_background(cell_grand, "bbdefb")
                     cell_grand.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                     p_grand = cell_grand.paragraphs[0]
                     p_grand.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run_grand = p_grand.add_run(f"Total L: {total_matrix_L:,.0f} m\nTotal W: {total_matrix_W:,.0f} kg")
+                    run_grand = p_grand.add_run(
+                        f"Total L: {total_matrix_L:,.0f} m\n"
+                        f"Total W: {total_matrix_W / 1000:,.2f} ton\n"
+                        f"Total Coils: {int(total_matrix_coils)}\n"
+                        f"Scrap: {total_matrix_scrap_rate:.2f}%"
+                    )
                     run_grand.font.size, run_grand.font.bold = Pt(9), True
                     run_grand.font.color.rgb = RGBColor(183, 28, 28)
-                
+
                     word_buffer = io.BytesIO()
                     doc.save(word_buffer)
                     word_buffer.seek(0)
@@ -3347,8 +3422,10 @@ if uploaded_file is not None:
                             else RGBColor(220, 20, 60)
                         )
 
-            p_len = prod_summary.get(prod, {}).get(LEN_COL, 0)
-            p_wt = prod_summary.get(prod, {}).get(WT_COL, 0)
+            p_len = prod_summary.get(prod, {}).get('Total_Length', 0)
+            p_wt_ton = prod_summary.get(prod, {}).get('Total_Weight', 0) / 1000
+            p_coils = prod_summary.get(prod, {}).get('Total_Coils', 0)
+            p_scrap_rate = prod_summary.get(prod, {}).get('Scrap_Rate', 0)
 
             cell_out = row_cells[-1]
             set_cell_background(
@@ -3362,7 +3439,9 @@ if uploaded_file is not None:
 
             run_out = p_out.add_run(
                 f"L: {p_len:,.0f} m\n"
-                f"W: {p_wt:,.0f} kg"
+                f"W: {p_wt_ton:,.2f} ton\n"
+                f"Coils: {int(p_coils)}\n"
+                f"Scrap: {p_scrap_rate:.2f}%"
             )
             run_out.font.size = Pt(6)
             run_out.font.bold = True
@@ -3385,8 +3464,10 @@ if uploaded_file is not None:
             run.font.size = Pt(6.5)
 
         for i, usage in enumerate(usage_months):
-            u_len = usage_summary.get(usage, {}).get(LEN_COL, 0)
-            u_wt = usage_summary.get(usage, {}).get(WT_COL, 0)
+            u_len = usage_summary.get(usage, {}).get('Total_Length', 0)
+            u_wt_ton = usage_summary.get(usage, {}).get('Total_Weight', 0) / 1000
+            u_coils = usage_summary.get(usage, {}).get('Total_Coils', 0)
+            u_scrap_rate = usage_summary.get(usage, {}).get('Scrap_Rate', 0)
 
             cell = row_cells[i + 1]
             set_cell_background(
@@ -3400,7 +3481,9 @@ if uploaded_file is not None:
 
             run = p.add_run(
                 f"L: {u_len:,.0f} m\n"
-                f"W: {u_wt:,.0f} kg"
+                f"W: {u_wt_ton:,.2f} ton\n"
+                f"Coils: {int(u_coils)}\n"
+                f"Scrap: {u_scrap_rate:.2f}%"
             )
             run.font.size = Pt(6)
             run.font.bold = True
@@ -3418,7 +3501,9 @@ if uploaded_file is not None:
 
         run_grand = p_grand.add_run(
             f"Total L: {total_matrix_L:,.0f} m\n"
-            f"Total W: {total_matrix_W:,.0f} kg"
+            f"Total W: {total_matrix_W / 1000:,.2f} ton\n"
+            f"Total Coils: {int(total_matrix_coils)}\n"
+            f"Scrap: {total_matrix_scrap_rate:.2f}%"
         )
         run_grand.font.size = Pt(6.5)
         run_grand.font.bold = True
